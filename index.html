@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>מערכת ADHD | מתן</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyBfxiFf8zcSmT7TlvHcHc4_NZoPxN_jz0w",
+      authDomain: "nutrition-plan-5ce1f.firebaseapp.com",
+      databaseURL: "https://nutrition-plan-5ce1f-default-rtdb.firebaseio.com",
+      projectId: "nutrition-plan-5ce1f",
+      storageBucket: "nutrition-plan-5ce1f.firebasestorage.app",
+      messagingSenderId: "1019976182145",
+      appId: "1:1019976182145:web:d2dc3e1b7763604d68a080"
+    });
+  </script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F9FAFB; -webkit-tap-highlight-color: transparent; }
+    input, button, textarea, select { -webkit-appearance: none; font-family: inherit; }
+    textarea { resize: none; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
+
+    // ── helpers ──────────────────────────────────────────────────────────────────
+    const db = firebase.database();
+    const USER = "matan";
+    const toDateStr = d => d.toISOString().split("T")[0];
+    const today = () => toDateStr(new Date());
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+    function usePersist(key, initial) {
+      const [val, setVal] = useState(initial);
+      useEffect(() => {
+        const ref = db.ref(`adhd/${USER}/${key}`);
+        ref.on('value', snap => { if (snap.exists()) setVal(snap.val()); });
+        return () => ref.off();
+      }, [key]);
+      const update = newVal => setVal(prev => {
+        const next = typeof newVal === 'function' ? newVal(prev) : newVal;
+        db.ref(`adhd/${USER}/${key}`).set(next);
+        return next;
+      });
+      return [val, update];
+    }
+
+    // ── design tokens ────────────────────────────────────────────────────────────
+    const C = {
+      bg: "#F9FAFB", card: "#FFFFFF", border: "#E5E7EB",
+      primary: "#7C3AED", primaryLight: "#EDE9FE",
+      text: "#111827", muted: "#6B7280",
+      success: "#10B981", successLight: "#D1FAE5",
+      warning: "#F59E0B", warningLight: "#FEF3C7",
+      danger: "#EF4444", dangerLight: "#FEE2E2",
+    };
+
+    const card  = { background: C.card, borderRadius: 12, border: `1px solid ${C.border}`, padding: 14, marginBottom: 10 };
+    const label = { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: 0.5 };
+    const inp   = { background: "#F9FAFB", border: `1px solid ${C.border}`, borderRadius: 9, padding: "10px 12px", color: C.text, fontSize: 14, outline: "none" };
+    const btn   = { background: C.primary, border: "none", borderRadius: 9, padding: "10px 16px", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" };
+    const timeBtn = (color, bg, active) => ({ padding: "7px 0", flex: 1, borderRadius: 8, border: `1.5px solid ${active ? color : C.border}`, background: active ? bg : "transparent", color: active ? color : C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer" });
+
+    // ── TodayTab ─────────────────────────────────────────────────────────────────
+    function TodayTab() {
+      const ds = today();
+      const [data, setData] = usePersist(`today/${ds}`, { energy: null, sleep: "", meds: false, notes: "" });
+      const set = (k, v) => setData(p => ({ ...p, [k]: v }));
+      const ENERGY = ["😴","😐","🙂","😊","⚡"];
+      const dayName = new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" });
+
+      return (
+        <div style={{ padding: 16 }}>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>{dayName}</div>
+
+          <div style={card}>
+            <div style={label}>⚡ רמת אנרגיה</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              {ENERGY.map((e, i) => (
+                <button key={i} onClick={() => set("energy", i + 1)} style={{
+                  flex: 1, height: 48, borderRadius: 10, fontSize: 22, cursor: "pointer",
+                  border: data.energy === i + 1 ? `2px solid ${C.primary}` : `1px solid ${C.border}`,
+                  background: data.energy === i + 1 ? C.primaryLight : C.card,
+                }}>{e}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={card}>
+            <div style={label}>😴 שעות שינה</div>
+            <input type="number" min="0" max="24" step="0.5" value={data.sleep}
+              onChange={e => set("sleep", e.target.value)} placeholder="כמה שעות ישנת?"
+              style={{ ...inp, width: "100%", marginTop: 10 }} />
+          </div>
+
+          <div style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={label}>💊 תרופות</div>
+            <button onClick={() => set("meds", !data.meds)} style={{
+              padding: "8px 20px", borderRadius: 20, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13,
+              background: data.meds ? C.successLight : "#F3F4F6",
+              color: data.meds ? C.success : C.muted,
+            }}>{data.meds ? "✓ לקחתי" : "לא עדיין"}</button>
+          </div>
+
+          <div style={card}>
+            <div style={label}>📝 הערות לעצמי</div>
+            <textarea value={data.notes} onChange={e => set("notes", e.target.value)}
+              placeholder="מה על הלב? מה קשה היום? מה הצלחתי?"
+              rows={4} style={{ ...inp, width: "100%", marginTop: 10, lineHeight: 1.6 }} />
+          </div>
+        </div>
+      );
+    }
+
+    // ── InboxTab ─────────────────────────────────────────────────────────────────
+    function InboxTab({ onAddTask }) {
+      const [inbox, setInbox] = usePersist("inbox-v1", {});
+      const [text, setText] = useState("");
+      const inputRef = useRef(null);
+      useEffect(() => { inputRef.current?.focus(); }, []);
+
+      const capture = () => {
+        if (!text.trim()) return;
+        const id = uid();
+        setInbox(p => ({ ...(p || {}), [id]: { id, text: text.trim(), createdAt: Date.now() } }));
+        setText("");
+        inputRef.current?.focus();
+      };
+
+      const process = (id, time) => {
+        const item = (inbox || {})[id];
+        if (!item) return;
+        onAddTask({ text: item.text, time, nextAction: "" });
+        setInbox(p => { const n = { ...p }; delete n[id]; return n; });
+      };
+
+      const del = (id) => setInbox(p => { const n = { ...p }; delete n[id]; return n; });
+
+      const items = Object.values(inbox || {}).sort((a, b) => b.createdAt - a.createdAt);
+
+      return (
+        <div style={{ padding: 16 }}>
+          <div style={{ ...card, border: `2px solid ${C.primary}` }}>
+            <div style={label}>🧠 לכד מחשבה</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <input ref={inputRef} value={text} onChange={e => setText(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && capture()}
+                placeholder="כל מה שבראש — כתוב ושחרר..."
+                style={{ ...inp, flex: 1 }} />
+              <button onClick={capture} style={btn}>✓</button>
+            </div>
+          </div>
+
+          {items.length === 0 ? (
+            <div style={{ textAlign: "center", color: C.muted, fontSize: 14, marginTop: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🧘</div>
+              <div>תיבת הדואר ריקה</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>כתוב כל מה שמסתובב בראש</div>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>{items.length} פריטים לעיבוד</div>
+              {items.map(item => (
+                <div key={item.id} style={{ ...card, marginBottom: 8 }}>
+                  <div style={{ fontSize: 14, color: C.text, marginBottom: 10, lineHeight: 1.5 }}>{item.text}</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => process(item.id, "today")} style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.danger}`, background: C.dangerLight, color: C.danger, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>היום</button>
+                    <button onClick={() => process(item.id, "week")}  style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.warning}`, background: C.warningLight, color: C.warning, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>שבוע</button>
+                    <button onClick={() => process(item.id, "someday")} style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.muted}`, background: "#F3F4F6", color: C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>יום אחד</button>
+                    <button onClick={() => del(item.id)} style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${C.border}`, background: C.card, color: C.muted, fontSize: 14, cursor: "pointer", marginRight: "auto" }}>🗑</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── TasksTab ─────────────────────────────────────────────────────────────────
+    function TaskItem({ task, color, bg, onToggle, onDelete }) {
+      return (
+        <div style={{ ...card, marginBottom: 6, opacity: task.completed ? 0.6 : 1, borderRight: `3px solid ${task.completed ? C.border : color}` }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <button onClick={onToggle} style={{
+              width: 22, height: 22, borderRadius: 6, flexShrink: 0, marginTop: 1,
+              border: `2px solid ${task.completed ? color : C.border}`, background: task.completed ? bg : "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 12, color, fontWeight: 700, cursor: "pointer",
+            }}>{task.completed ? "✓" : ""}</button>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: task.completed ? C.muted : C.text, textDecoration: task.completed ? "line-through" : "none", lineHeight: 1.4 }}>{task.text}</div>
+              {task.nextAction && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>👉 {task.nextAction}</div>}
+            </div>
+            <button onClick={onDelete} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 4px" }}>×</button>
+          </div>
+        </div>
+      );
+    }
+
+    function TasksTab({ tasks, setTasks, addTask }) {
+      const [text, setText] = useState("");
+      const [nextAction, setNextAction] = useState("");
+      const [time, setTime] = useState("today");
+
+      const add = () => {
+        if (!text.trim()) return;
+        addTask({ text: text.trim(), time, nextAction: nextAction.trim() });
+        setText(""); setNextAction("");
+      };
+
+      const toggle = id => setTasks(p => ({ ...p, [id]: { ...p[id], completed: !p[id].completed, completedAt: !p[id].completed ? Date.now() : null } }));
+      const del    = id => setTasks(p => { const n = { ...p }; delete n[id]; return n; });
+
+      const all = Object.values(tasks || {});
+      const groups = [
+        { key: "today",   label: "היום",    color: C.danger,  bg: C.dangerLight,  icon: "🔴" },
+        { key: "week",    label: "השבוע",   color: C.warning, bg: C.warningLight, icon: "🟡" },
+        { key: "someday", label: "יום אחד", color: C.muted,   bg: "#F3F4F6",      icon: "⚪" },
+      ];
+
+      return (
+        <div style={{ padding: 16 }}>
+          <div style={card}>
+            <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
+              placeholder="משימה חדשה..." style={{ ...inp, width: "100%", marginBottom: 8 }} />
+            <input value={nextAction} onChange={e => setNextAction(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
+              placeholder="הצעד הבא הספציפי (אופציונלי)" style={{ ...inp, width: "100%", fontSize: 12, marginBottom: 10 }} />
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {groups.map(g => <button key={g.key} onClick={() => setTime(g.key)} style={timeBtn(g.color, g.bg, time === g.key)}>{g.label}</button>)}
+              <button onClick={add} style={{ ...btn, padding: "8px 16px" }}>➕</button>
+            </div>
+          </div>
+
+          {groups.map(g => {
+            const open = all.filter(t => t.time === g.key && !t.completed);
+            const done = all.filter(t => t.time === g.key &&  t.completed);
+            if (!open.length && !done.length) return null;
+            return (
+              <div key={g.key} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                  <span>{g.icon}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: g.color }}>{g.label}</span>
+                  <span style={{ fontSize: 11, color: C.muted }}>({open.length} פתוחות{done.length ? `, ${done.length} הושלמו` : ""})</span>
+                </div>
+                {open.map(t => <TaskItem key={t.id} task={t} color={g.color} bg={g.bg} onToggle={() => toggle(t.id)} onDelete={() => del(t.id)} />)}
+                {done.slice(0, 3).map(t => <TaskItem key={t.id} task={t} color={g.color} bg={g.bg} onToggle={() => toggle(t.id)} onDelete={() => del(t.id)} />)}
+              </div>
+            );
+          })}
+
+          {all.length === 0 && (
+            <div style={{ textAlign: "center", color: C.muted, fontSize: 14, marginTop: 40 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🎯</div>
+              <div>אין משימות עדיין</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── FocusTab ─────────────────────────────────────────────────────────────────
+    function FocusTab({ tasks }) {
+      const MODES = {
+        work:  { label: "עבודה",        duration: 25 * 60, color: C.primary },
+        short: { label: "הפסקה קצרה",  duration:  5 * 60, color: C.success },
+        long:  { label: "הפסקה ארוכה", duration: 15 * 60, color: C.warning },
+      };
+
+      const [mode, setMode] = useState("work");
+      const [running, setRunning] = useState(false);
+      const [seconds, setSeconds] = useState(25 * 60);
+      const [sessions, setSessions] = usePersist("pomodoro-" + today(), 0);
+      const [selected, setSelected] = useState("");
+      const interval = useRef(null);
+
+      const todayTasks = Object.values(tasks || {}).filter(t => t.time === "today" && !t.completed);
+      const mc = MODES[mode].color;
+
+      useEffect(() => {
+        if (running) {
+          interval.current = setInterval(() => {
+            setSeconds(s => {
+              if (s <= 1) {
+                clearInterval(interval.current);
+                setRunning(false);
+                if (mode === "work") setSessions(p => (p || 0) + 1);
+                return 0;
+              }
+              return s - 1;
+            });
+          }, 1000);
+        }
+        return () => clearInterval(interval.current);
+      }, [running, mode]);
+
+      const switchMode = m => { setRunning(false); clearInterval(interval.current); setMode(m); setSeconds(MODES[m].duration); };
+      const reset = () => { setRunning(false); clearInterval(interval.current); setSeconds(MODES[mode].duration); };
+
+      const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+      const ss = String(seconds % 60).padStart(2, "0");
+      const r = 90, circ = 2 * Math.PI * r;
+      const pct = 1 - seconds / MODES[mode].duration;
+
+      return (
+        <div style={{ padding: 16 }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 20, background: C.card, borderRadius: 12, padding: 4, border: `1px solid ${C.border}` }}>
+            {Object.entries(MODES).map(([k, m]) => (
+              <button key={k} onClick={() => switchMode(k)} style={{
+                flex: 1, padding: "8px 0", borderRadius: 9, border: "none", cursor: "pointer",
+                background: mode === k ? mc : "transparent", color: mode === k ? "#fff" : C.muted,
+                fontSize: 12, fontWeight: 700, transition: "all 0.2s",
+              }}>{m.label}</button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+            <div style={{ position: "relative", width: 220, height: 220 }}>
+              <svg width={220} height={220} style={{ transform: "rotate(-90deg)" }}>
+                <circle cx={110} cy={110} r={r} fill="none" stroke={C.border} strokeWidth={8} />
+                <circle cx={110} cy={110} r={r} fill="none" stroke={mc} strokeWidth={8}
+                  strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)}
+                  strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s" }} />
+              </svg>
+              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ fontSize: 48, fontWeight: 700, color: C.text, fontFamily: "monospace", letterSpacing: 2 }}>{mm}:{ss}</div>
+                <div style={{ fontSize: 13, color: C.muted }}>{MODES[mode].label}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 20 }}>
+            <button onClick={reset} style={{ width: 48, height: 48, borderRadius: 14, border: `1px solid ${C.border}`, background: C.card, fontSize: 20, cursor: "pointer" }}>↺</button>
+            <button onClick={() => setRunning(r => !r)} style={{ width: 130, height: 48, borderRadius: 14, border: "none", background: mc, color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer" }}>
+              {running ? "⏸ השהה" : "▶ התחל"}
+            </button>
+          </div>
+
+          <div style={{ ...card, textAlign: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>סשנים היום</div>
+            <div style={{ fontSize: 28, fontWeight: 700, color: mc }}>{sessions || 0} 🍅</div>
+          </div>
+
+          {todayTasks.length > 0 && (
+            <div style={card}>
+              <div style={{ ...label, marginBottom: 8 }}>📌 ממוקד על</div>
+              <select value={selected} onChange={e => setSelected(e.target.value)} style={{ ...inp, width: "100%" }}>
+                <option value="">בחר משימה...</option>
+                {todayTasks.map(t => <option key={t.id} value={t.id}>{t.text}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── MetricsTab ────────────────────────────────────────────────────────────────
+    function MetricsTab({ tasks }) {
+      const [history, setHistory] = useState([]);
+
+      useEffect(() => {
+        const days = Array.from({ length: 7 }, (_, i) => {
+          const d = new Date(); d.setDate(d.getDate() - (6 - i)); return toDateStr(d);
+        });
+        Promise.all(days.map(ds =>
+          new Promise(res => db.ref(`adhd/${USER}/today/${ds}`).once('value', snap => res({ date: ds, ...(snap.val() || {}) })))
+        )).then(setHistory);
+      }, []);
+
+      const all = Object.values(tasks || {});
+      const completedThisWeek = all.filter(t => t.completed && t.completedAt && Date.now() - t.completedAt < 7 * 24 * 3600 * 1000).length;
+      const openToday = all.filter(t => t.time === "today" && !t.completed).length;
+
+      const DAY = ["א","ב","ג","ד","ה","ו","ש"];
+      const chartData = history.map(h => ({
+        name: DAY[new Date(h.date + "T12:00:00").getDay()],
+        אנרגיה: h.energy || null,
+        שינה: h.sleep ? parseFloat(h.sleep) : null,
+      }));
+
+      return (
+        <div style={{ padding: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+            {[
+              ["✅ הושלם השבוע", completedThisWeek, C.success],
+              ["🎯 פתוח היום",   openToday,         C.danger],
+              ["📝 סה״כ משימות", all.length,         C.primary],
+              ["📥 ממתינות",     all.filter(t => !t.completed).length, C.warning],
+            ].map(([l, v, c]) => (
+              <div key={l} style={{ ...card, textAlign: "center" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: c, fontFamily: "monospace" }}>{v}</div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={card}>
+            <div style={{ ...label, marginBottom: 12 }}>⚡ אנרגיה — 7 ימים</div>
+            <ResponsiveContainer width="100%" height={150}>
+              <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.muted }} />
+                <YAxis domain={[0, 5]} tick={{ fontSize: 11, fill: C.muted }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="אנרגיה" stroke={C.primary} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={card}>
+            <div style={{ ...label, marginBottom: 12 }}>😴 שינה — 7 ימים</div>
+            <ResponsiveContainer width="100%" height={150}>
+              <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.muted }} />
+                <YAxis domain={[0, 12]} tick={{ fontSize: 11, fill: C.muted }} />
+                <Tooltip />
+                <Line type="monotone" dataKey="שינה" stroke={C.success} strokeWidth={2} dot={{ r: 4 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      );
+    }
+
+    // ── App ───────────────────────────────────────────────────────────────────────
+    function App() {
+      const [tab, setTab] = useState("today");
+      const [tasks, setTasks] = usePersist("adhd-tasks-v1", {});
+
+      const addTask = ({ text, time, nextAction }) => {
+        const id = uid();
+        setTasks(p => ({ ...(p || {}), [id]: { id, text, time, nextAction, completed: false, createdAt: Date.now(), completedAt: null } }));
+      };
+
+      const TABS = [
+        ["today",   "היום",    "☀️"],
+        ["inbox",   "ל״ל",     "📥"],
+        ["tasks",   "משימות",  "✅"],
+        ["focus",   "פוקוס",   "🍅"],
+        ["metrics", "מדדים",   "📊"],
+      ];
+
+      return (
+        <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", direction: "rtl", color: C.text, paddingBottom: 80 }}>
+          <div style={{ padding: "14px 16px 10px", background: "#fff", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 20 }}>
+            <div style={{ maxWidth: 520, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: C.primary }}>🧠 מערכת ADHD</div>
+                <div style={{ fontSize: 11, color: C.muted }}>היי מתן 👋</div>
+              </div>
+              <div style={{ fontSize: 12, color: C.muted }}>
+                {new Date().toLocaleDateString("he-IL", { weekday: "short", day: "numeric", month: "short" })}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 520, margin: "0 auto" }}>
+            {tab === "today"   && <TodayTab />}
+            {tab === "inbox"   && <InboxTab onAddTask={addTask} />}
+            {tab === "tasks"   && <TasksTab tasks={tasks} setTasks={setTasks} addTask={addTask} />}
+            {tab === "focus"   && <FocusTab tasks={tasks} />}
+            {tab === "metrics" && <MetricsTab tasks={tasks} />}
+          </div>
+
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: `1px solid ${C.border}`, padding: "8px 0 12px", zIndex: 20 }}>
+            <div style={{ maxWidth: 520, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(5, 1fr)" }}>
+              {TABS.map(([k, l, e]) => (
+                <button key={k} onClick={() => setTab(k)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 0" }}>
+                  <span style={{ fontSize: 20 }}>{e}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: tab === k ? C.primary : C.muted }}>{l}</span>
+                  {tab === k && <div style={{ width: 4, height: 4, borderRadius: 2, background: C.primary }} />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
