@@ -20,7 +20,6 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #F9FAFB; -webkit-tap-highlight-color: transparent; }
@@ -34,7 +33,6 @@
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
-    const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
 
     // ── helpers ──────────────────────────────────────────────────────────────────
     const db = firebase.database();
@@ -368,6 +366,25 @@
     }
 
     // ── MetricsTab ────────────────────────────────────────────────────────────────
+    function BarChart({ data, max, color, dayLabels }) {
+      const W = 36, GAP = 6, H = 100;
+      return (
+        <svg width={(W + GAP) * data.length} height={H + 20} style={{ display: "block" }}>
+          {data.map((v, i) => {
+            const barH = v ? Math.max(4, (v / max) * H) : 0;
+            const x = i * (W + GAP);
+            return (
+              <g key={i}>
+                <rect x={x} y={H - barH} width={W} height={barH} rx={4} fill={v ? color : C.border} />
+                {v && <text x={x + W / 2} y={H - barH - 4} textAnchor="middle" fontSize={10} fill={color}>{v}</text>}
+                <text x={x + W / 2} y={H + 14} textAnchor="middle" fontSize={10} fill={C.muted}>{dayLabels[i]}</text>
+              </g>
+            );
+          })}
+        </svg>
+      );
+    }
+
     function MetricsTab({ tasks }) {
       const [history, setHistory] = useState([]);
 
@@ -385,11 +402,9 @@
       const openToday = all.filter(t => t.time === "today" && !t.completed).length;
 
       const DAY = ["א","ב","ג","ד","ה","ו","ש"];
-      const chartData = history.map(h => ({
-        name: DAY[new Date(h.date + "T12:00:00").getDay()],
-        אנרגיה: h.energy || null,
-        שינה: h.sleep ? parseFloat(h.sleep) : null,
-      }));
+      const dayLabels = history.map(h => DAY[new Date(h.date + "T12:00:00").getDay()]);
+      const energyData = history.map(h => h.energy || 0);
+      const sleepData  = history.map(h => h.sleep ? parseFloat(h.sleep) : 0);
 
       return (
         <div style={{ padding: 16 }}>
@@ -408,29 +423,13 @@
           </div>
 
           <div style={card}>
-            <div style={{ ...label, marginBottom: 12 }}>⚡ אנרגיה — 7 ימים</div>
-            <ResponsiveContainer width="100%" height={150}>
-              <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.muted }} />
-                <YAxis domain={[0, 5]} tick={{ fontSize: 11, fill: C.muted }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="אנרגיה" stroke={C.primary} strokeWidth={2} dot={{ r: 4 }} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
+            <div style={{ ...label, marginBottom: 12 }}>⚡ אנרגיה — 7 ימים (מקס׳ 5)</div>
+            <BarChart data={energyData} max={5} color={C.primary} dayLabels={dayLabels} />
           </div>
 
           <div style={card}>
-            <div style={{ ...label, marginBottom: 12 }}>😴 שינה — 7 ימים</div>
-            <ResponsiveContainer width="100%" height={150}>
-              <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="name" tick={{ fontSize: 11, fill: C.muted }} />
-                <YAxis domain={[0, 12]} tick={{ fontSize: 11, fill: C.muted }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="שינה" stroke={C.success} strokeWidth={2} dot={{ r: 4 }} connectNulls />
-              </LineChart>
-            </ResponsiveContainer>
+            <div style={{ ...label, marginBottom: 12 }}>😴 שינה — 7 ימים (שעות)</div>
+            <BarChart data={sleepData} max={12} color={C.success} dayLabels={dayLabels} />
           </div>
         </div>
       );
