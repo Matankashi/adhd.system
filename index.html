@@ -20,6 +20,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #F9FAFB; -webkit-tap-highlight-color: transparent; }
@@ -30,467 +31,1010 @@
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+const { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } = (window.Recharts || {});
 
-    // ── helpers ──────────────────────────────────────────────────────────────────
-    const db = firebase.database();
-    const USER = "matan";
-    const toDateStr = d => d.toISOString().split("T")[0];
-    const today = () => toDateStr(new Date());
-    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+// ── Firebase persistence (replaces window.storage) ───────────────────────────
+const _db = firebase.database();
+const USER = "matan";
 
-    function usePersist(key, initial) {
-      const [val, setVal] = useState(initial);
-      useEffect(() => {
-        const ref = db.ref(`adhd/${USER}/${key}`);
-        ref.on('value', snap => { if (snap.exists()) setVal(snap.val()); });
-        return () => ref.off();
-      }, [key]);
-      const update = newVal => setVal(prev => {
-        const next = typeof newVal === 'function' ? newVal(prev) : newVal;
-        db.ref(`adhd/${USER}/${key}`).set(next);
-        return next;
-      });
-      return [val, update];
+const sget = (key, fallback) => new Promise(res =>
+  _db.ref(`adhd/${USER}/${key}`).once('value', snap => {
+    if (!snap.exists()) { res(fallback); return; }
+    const val = snap.val();
+    if (Array.isArray(fallback)) {
+      res(Array.isArray(val) ? val : (val && typeof val === 'object' ? Object.values(val) : fallback));
+    } else {
+      res(val !== null ? val : fallback);
     }
+  })
+);
+const sset = (key, val) => _db.ref(`adhd/${USER}/${key}`).set(val);
 
-    // ── design tokens ────────────────────────────────────────────────────────────
-    const C = {
-      bg: "#F9FAFB", card: "#FFFFFF", border: "#E5E7EB",
-      primary: "#7C3AED", primaryLight: "#EDE9FE",
-      text: "#111827", muted: "#6B7280",
-      success: "#10B981", successLight: "#D1FAE5",
-      warning: "#F59E0B", warningLight: "#FEF3C7",
-      danger: "#EF4444", dangerLight: "#FEE2E2",
-    };
+// ── helpers ───────────────────────────────────────────────────────────────────
+const TODAY = new Date().toISOString().split("T")[0];
+const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+const pad = n => String(n).padStart(2, "0");
+const daysSince = dateStr => dateStr ? Math.floor((Date.now() - new Date(dateStr)) / 86400000) : 0;
 
-    const card  = { background: C.card, borderRadius: 12, border: `1px solid ${C.border}`, padding: 14, marginBottom: 10 };
-    const label = { fontSize: 12, fontWeight: 700, color: C.muted, letterSpacing: 0.5 };
-    const inp   = { background: "#F9FAFB", border: `1px solid ${C.border}`, borderRadius: 9, padding: "10px 12px", color: C.text, fontSize: 14, outline: "none" };
-    const btn   = { background: C.primary, border: "none", borderRadius: 9, padding: "10px 16px", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" };
-    const timeBtn = (color, bg, active) => ({ padding: "7px 0", flex: 1, borderRadius: 8, border: `1.5px solid ${active ? color : C.border}`, background: active ? bg : "transparent", color: active ? color : C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer" });
+// ── design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  purple: "#6D28D9", purpleLight: "#EDE9FE", purpleMid: "#8B5CF6",
+  green: "#059669", greenLight: "#D1FAE5",
+  amber: "#D97706", amberLight: "#FEF3C7",
+  red: "#DC2626", redLight: "#FEE2E2",
+  blue: "#2563EB", blueLight: "#DBEAFE",
+  teal: "#0D9488", tealLight: "#CCFBF1",
+  orange: "#EA580C", orangeLight: "#FED7AA",
+  gray: "#6B7280", grayLight: "#F3F4F6", grayBorder: "#E5E7EB",
+  text: "#111827", textMid: "#374151", textLight: "#6B7280",
+  white: "#FFFFFF", bg: "#F9FAFB",
+};
+const card = { background: C.white, borderRadius: 14, padding: 16, marginBottom: 12, border: `1px solid ${C.grayBorder}` };
+const inp = { width: "100%", border: `1.5px solid ${C.grayBorder}`, borderRadius: 8, padding: "9px 12px", fontSize: 14, outline: "none", boxSizing: "border-box", direction: "rtl", background: C.white, color: C.text, fontFamily: "inherit" };
+const btn = (bg, col) => ({ background: bg || C.purple, color: col || C.white, border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" });
 
-    // ── TodayTab ─────────────────────────────────────────────────────────────────
-    function TodayTab() {
-      const ds = today();
-      const [data, setData] = usePersist(`today/${ds}`, { energy: null, sleep: "", meds: false, notes: "" });
-      const set = (k, v) => setData(p => ({ ...p, [k]: v }));
-      const ENERGY = ["😴","😐","🙂","😊","⚡"];
-      const dayName = new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" });
+const CTX_OPTS = [
+  { v: "computer", l: "💻 מחשב" }, { v: "phone", l: "📞 טלפון" },
+  { v: "home", l: "🏠 בית" }, { v: "outside", l: "🚗 חוץ" }, { v: "shopping", l: "🛒 קניות" }
+];
+const TIME_OPTS = [{ v: 5, l: "5′" }, { v: 10, l: "10′" }, { v: 15, l: "15′" }, { v: 25, l: "25′" }, { v: 50, l: "50′" }];
+const ENERGY_OPTS = [{ v: "low", l: "🔋 נמוכה" }, { v: "medium", l: "⚡ בינונית" }, { v: "high", l: "🚀 גבוהה" }];
+const PROJ_STATUS = { active: { l: "פעיל", c: C.green }, waiting: { l: "ממתין", c: C.amber }, frozen: { l: "מוקפא", c: C.gray } };
 
-      return (
-        <div style={{ padding: 16 }}>
-          <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>{dayName}</div>
+// ── shared components ─────────────────────────────────────────────────────────
+function Stars({ value, onChange, max = 5 }) {
+  return <div style={{ display: "flex", gap: 4 }}>{Array.from({ length: max }).map((_, i) => (
+    <button key={i} onClick={() => onChange(i + 1)} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer", opacity: i < value ? 1 : 0.18, padding: 0, lineHeight: 1 }}>★</button>
+  ))}</div>;
+}
+function Chip({ label, color, bg, small }) {
+  return <span style={{ background: bg || color + "18", color, fontSize: small ? 10 : 11, fontWeight: 700, padding: small ? "2px 6px" : "2px 8px", borderRadius: 20, border: `1px solid ${color}28`, whiteSpace: "nowrap" }}>{label}</span>;
+}
+function Sel({ value, onChange, opts, placeholder }) {
+  return (
+    <select value={value != null ? value : ""} onChange={e => onChange(e.target.value)}
+      style={{ border: `1.5px solid ${C.grayBorder}`, borderRadius: 8, padding: "7px 10px", fontSize: 13, outline: "none", background: C.white, direction: "rtl", color: (value != null && value !== "") ? C.text : C.textLight, cursor: "pointer", fontFamily: "inherit" }}>
+      {placeholder && <option value="">{placeholder}</option>}
+      {opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+    </select>
+  );
+}
 
-          <div style={card}>
-            <div style={label}>⚡ רמת אנרגיה</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              {ENERGY.map((e, i) => (
-                <button key={i} onClick={() => set("energy", i + 1)} style={{
-                  flex: 1, height: 48, borderRadius: 10, fontSize: 22, cursor: "pointer",
-                  border: data.energy === i + 1 ? `2px solid ${C.primary}` : `1px solid ${C.border}`,
-                  background: data.energy === i + 1 ? C.primaryLight : C.card,
-                }}>{e}</button>
-              ))}
-            </div>
+// ── ProjectModal ──────────────────────────────────────────────────────────────
+function ProjectModal({ project, onClose, onSave }) {
+  const [p, setP] = useState(() => project || { id: uid(), name: "", outcome: "", done_definition: "", why: "", deadline: "", not_in_scope: "", blockers: "", reference: "", status: "active", milestones: [], createdAt: new Date().toISOString() });
+  const [mText, setMText] = useState("");
+  const upd = k => v => setP(prev => ({ ...prev, [k]: v }));
+  const addMilestone = () => {
+    if (!mText.trim()) return;
+    setP(prev => ({ ...prev, milestones: [...(prev.milestones || []), { id: uid(), text: mText.trim(), due: "", done_def: "", completed: false }] }));
+    setMText("");
+  };
+  const updM = (id, k, v) => setP(prev => ({ ...prev, milestones: prev.milestones.map(m => m.id === id ? { ...m, [k]: v } : m) }));
+  const delM = id => setP(prev => ({ ...prev, milestones: prev.milestones.filter(m => m.id !== id) }));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 12 }} onClick={onClose}>
+      <div style={{ background: C.white, borderRadius: 16, padding: 20, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", direction: "rtl" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.text, marginBottom: 16 }}>📁 {project ? "ערוך פרויקט" : "פרויקט חדש"}</div>
+        {[
+          { k: "name", label: "שם הפרויקט *", ph: "לדוגמה: מעבר דירה / הסמכה מקצועית" },
+          { k: "outcome", label: "תוצאה רצויה *", ph: "מה בדיוק ייחשב הושלם?" },
+          { k: "done_definition", label: "הגדרת \"בוצע\" *", ph: "מצב ברור שאדע שסיימתי..." },
+          { k: "why", label: "למה זה חשוב", ph: "המניע מאחורי הפרויקט..." },
+          { k: "not_in_scope", label: "מה לא נכנס לפרויקט", ph: "גבולות ברורים..." },
+          { k: "blockers", label: "חסמים / תלויות", ph: "מה עלול לעצור אותי?" },
+          { k: "reference", label: "מיקום חומרי רקע", ph: "Google Drive / תיקייה..." },
+        ].map(f => (
+          <div key={f.k} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>{f.label}</div>
+            <input value={p[f.k] || ""} onChange={e => upd(f.k)(e.target.value)} placeholder={f.ph} style={{ ...inp, fontSize: 13 }} />
           </div>
-
-          <div style={card}>
-            <div style={label}>😴 שעות שינה</div>
-            <input type="number" min="0" max="24" step="0.5" value={data.sleep}
-              onChange={e => set("sleep", e.target.value)} placeholder="כמה שעות ישנת?"
-              style={{ ...inp, width: "100%", marginTop: 10 }} />
+        ))}
+        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>דדליין</div>
+            <input type="date" value={p.deadline || ""} onChange={e => upd("deadline")(e.target.value)} style={{ ...inp, direction: "ltr", fontSize: 13 }} />
           </div>
-
-          <div style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={label}>💊 תרופות</div>
-            <button onClick={() => set("meds", !data.meds)} style={{
-              padding: "8px 20px", borderRadius: 20, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13,
-              background: data.meds ? C.successLight : "#F3F4F6",
-              color: data.meds ? C.success : C.muted,
-            }}>{data.meds ? "✓ לקחתי" : "לא עדיין"}</button>
-          </div>
-
-          <div style={card}>
-            <div style={label}>📝 הערות לעצמי</div>
-            <textarea value={data.notes} onChange={e => set("notes", e.target.value)}
-              placeholder="מה על הלב? מה קשה היום? מה הצלחתי?"
-              rows={4} style={{ ...inp, width: "100%", marginTop: 10, lineHeight: 1.6 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>סטטוס</div>
+            <Sel value={p.status} onChange={upd("status")} opts={Object.entries(PROJ_STATUS).map(([v, s]) => ({ v, l: s.l }))} />
           </div>
         </div>
-      );
-    }
-
-    // ── InboxTab ─────────────────────────────────────────────────────────────────
-    function InboxTab({ onAddTask }) {
-      const [inbox, setInbox] = usePersist("inbox-v1", {});
-      const [text, setText] = useState("");
-      const inputRef = useRef(null);
-      useEffect(() => { inputRef.current?.focus(); }, []);
-
-      const capture = () => {
-        if (!text.trim()) return;
-        const id = uid();
-        setInbox(p => ({ ...(p || {}), [id]: { id, text: text.trim(), createdAt: Date.now() } }));
-        setText("");
-        inputRef.current?.focus();
-      };
-
-      const process = (id, time) => {
-        const item = (inbox || {})[id];
-        if (!item) return;
-        onAddTask({ text: item.text, time, nextAction: "" });
-        setInbox(p => { const n = { ...p }; delete n[id]; return n; });
-      };
-
-      const del = (id) => setInbox(p => { const n = { ...p }; delete n[id]; return n; });
-
-      const items = Object.values(inbox || {}).sort((a, b) => b.createdAt - a.createdAt);
-
-      return (
-        <div style={{ padding: 16 }}>
-          <div style={{ ...card, border: `2px solid ${C.primary}` }}>
-            <div style={label}>🧠 לכד מחשבה</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <input ref={inputRef} value={text} onChange={e => setText(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && capture()}
-                placeholder="כל מה שבראש — כתוב ושחרר..."
-                style={{ ...inp, flex: 1 }} />
-              <button onClick={capture} style={btn}>✓</button>
-            </div>
-          </div>
-
-          {items.length === 0 ? (
-            <div style={{ textAlign: "center", color: C.muted, fontSize: 14, marginTop: 40 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>🧘</div>
-              <div>תיבת הדואר ריקה</div>
-              <div style={{ fontSize: 12, marginTop: 4 }}>כתוב כל מה שמסתובב בראש</div>
-            </div>
-          ) : (
-            <div>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>{items.length} פריטים לעיבוד</div>
-              {items.map(item => (
-                <div key={item.id} style={{ ...card, marginBottom: 8 }}>
-                  <div style={{ fontSize: 14, color: C.text, marginBottom: 10, lineHeight: 1.5 }}>{item.text}</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => process(item.id, "today")} style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.danger}`, background: C.dangerLight, color: C.danger, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>היום</button>
-                    <button onClick={() => process(item.id, "week")}  style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.warning}`, background: C.warningLight, color: C.warning, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>שבוע</button>
-                    <button onClick={() => process(item.id, "someday")} style={{ padding: "6px 12px", borderRadius: 7, border: `1px solid ${C.muted}`, background: "#F3F4F6", color: C.muted, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>יום אחד</button>
-                    <button onClick={() => del(item.id)} style={{ padding: "6px 10px", borderRadius: 7, border: `1px solid ${C.border}`, background: C.card, color: C.muted, fontSize: 14, cursor: "pointer", marginRight: "auto" }}>🗑</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ── TasksTab ─────────────────────────────────────────────────────────────────
-    function TaskItem({ task, color, bg, onToggle, onDelete }) {
-      return (
-        <div style={{ ...card, marginBottom: 6, opacity: task.completed ? 0.6 : 1, borderRight: `3px solid ${task.completed ? C.border : color}` }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-            <button onClick={onToggle} style={{
-              width: 22, height: 22, borderRadius: 6, flexShrink: 0, marginTop: 1,
-              border: `2px solid ${task.completed ? color : C.border}`, background: task.completed ? bg : "transparent",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 12, color, fontWeight: 700, cursor: "pointer",
-            }}>{task.completed ? "✓" : ""}</button>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, color: task.completed ? C.muted : C.text, textDecoration: task.completed ? "line-through" : "none", lineHeight: 1.4 }}>{task.text}</div>
-              {task.nextAction && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>👉 {task.nextAction}</div>}
-            </div>
-            <button onClick={onDelete} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 4px" }}>×</button>
-          </div>
-        </div>
-      );
-    }
-
-    function TasksTab({ tasks, setTasks, addTask }) {
-      const [text, setText] = useState("");
-      const [nextAction, setNextAction] = useState("");
-      const [time, setTime] = useState("today");
-
-      const add = () => {
-        if (!text.trim()) return;
-        addTask({ text: text.trim(), time, nextAction: nextAction.trim() });
-        setText(""); setNextAction("");
-      };
-
-      const toggle = id => setTasks(p => ({ ...p, [id]: { ...p[id], completed: !p[id].completed, completedAt: !p[id].completed ? Date.now() : null } }));
-      const del    = id => setTasks(p => { const n = { ...p }; delete n[id]; return n; });
-
-      const all = Object.values(tasks || {});
-      const groups = [
-        { key: "today",   label: "היום",    color: C.danger,  bg: C.dangerLight,  icon: "🔴" },
-        { key: "week",    label: "השבוע",   color: C.warning, bg: C.warningLight, icon: "🟡" },
-        { key: "someday", label: "יום אחד", color: C.muted,   bg: "#F3F4F6",      icon: "⚪" },
-      ];
-
-      return (
-        <div style={{ padding: 16 }}>
-          <div style={card}>
-            <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
-              placeholder="משימה חדשה..." style={{ ...inp, width: "100%", marginBottom: 8 }} />
-            <input value={nextAction} onChange={e => setNextAction(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
-              placeholder="הצעד הבא הספציפי (אופציונלי)" style={{ ...inp, width: "100%", fontSize: 12, marginBottom: 10 }} />
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginTop: 14, marginBottom: 4 }}>📍 אבני דרך (3–7)</div>
+        <div style={{ fontSize: 11, color: C.textLight, marginBottom: 8 }}>כל אבן דרך = נקודת ביניים שניתן לבדוק</div>
+        {(p.milestones || []).map((m, i) => (
+          <div key={m.id} style={{ background: m.completed ? C.greenLight : C.grayLight, borderRadius: 10, padding: 10, marginBottom: 6, border: `1px solid ${m.completed ? C.green + "30" : C.grayBorder}` }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {groups.map(g => <button key={g.key} onClick={() => setTime(g.key)} style={timeBtn(g.color, g.bg, time === g.key)}>{g.label}</button>)}
-              <button onClick={add} style={{ ...btn, padding: "8px 16px" }}>➕</button>
+              <button onClick={() => updM(m.id, "completed", !m.completed)} style={{ fontSize: 16, background: "none", border: "none", cursor: "pointer", color: m.completed ? C.green : C.grayBorder }}>{m.completed ? "✅" : "⬜"}</button>
+              <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: m.completed ? C.green : C.text, textDecoration: m.completed ? "line-through" : "none" }}>{i + 1}. {m.text}</div>
+              <button onClick={() => delM(m.id)} style={{ background: "none", border: "none", color: C.grayBorder, cursor: "pointer", fontSize: 14 }}>✕</button>
+            </div>
+            {!m.completed && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <input value={m.due || ""} type="date" onChange={e => updM(m.id, "due", e.target.value)} style={{ border: `1px solid ${C.grayBorder}`, borderRadius: 6, padding: "4px 8px", fontSize: 11, direction: "ltr", outline: "none", background: C.white }} />
+                <input value={m.done_def || ""} onChange={e => updM(m.id, "done_def", e.target.value)} placeholder="מה ייחשב הושלם?" style={{ flex: 1, border: `1px solid ${C.grayBorder}`, borderRadius: 6, padding: "4px 8px", fontSize: 11, direction: "rtl", outline: "none", background: C.white, fontFamily: "inherit" }} />
+              </div>
+            )}
+          </div>
+        ))}
+        {(p.milestones || []).length < 7 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+            <input value={mText} onChange={e => setMText(e.target.value)} onKeyDown={e => e.key === "Enter" && addMilestone()} placeholder="הוסף אבן דרך..." style={{ ...inp, fontSize: 13, flex: 1 }} />
+            <button onClick={addMilestone} style={{ ...btn(), padding: "7px 14px", flexShrink: 0 }}>+</button>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button onClick={onClose} style={{ flex: 1, background: C.grayLight, color: C.textMid, border: "none", borderRadius: 10, padding: 12, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>ביטול</button>
+          <button onClick={() => { if (!p.name.trim() || !p.outcome.trim()) return; onSave(p); onClose(); }} disabled={!p.name.trim()} style={{ flex: 2, ...btn(!p.name.trim() ? C.grayBorder : C.purple, !p.name.trim() ? C.textLight : C.white), borderRadius: 10, padding: 12, fontSize: 14, cursor: p.name.trim() ? "pointer" : "default" }}>
+            {project ? "💾 שמור" : "✓ צור פרויקט"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── NextActionModal ───────────────────────────────────────────────────────────
+function NextActionModal({ projects, onClose, onSave, initialProjectId }) {
+  const [text, setText] = useState("");
+  const [projId, setProjId] = useState(initialProjectId || "");
+  const [milestoneId, setMilestoneId] = useState("");
+  const [time, setTime] = useState("week");
+  const [context, setContext] = useState("");
+  const [estMins, setEstMins] = useState(15);
+  const [energy, setEnergy] = useState("medium");
+  const [hardDate, setHardDate] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const [waitingFor, setWaitingFor] = useState("");
+  const activeProj = projects.find(p => p.id === projId);
+  const availableMilestones = activeProj?.milestones?.filter(m => !m.completed) || [];
+  const save = () => {
+    if (!text.trim()) return;
+    onSave({ id: uid(), text: text.trim(), nextAction: text.trim(), time, projectId: projId || null, milestoneId: milestoneId || null, context, estMins, energy, hardDate, status: waiting ? "waiting" : "active", waitingFor: waiting ? waitingFor : "", completed: false, createdAt: new Date().toISOString() });
+    onClose();
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
+      <div style={{ background: C.white, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 500, maxHeight: "85vh", overflowY: "auto", direction: "rtl" }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 40, height: 4, background: C.grayBorder, borderRadius: 2, margin: "0 auto 14px" }} />
+        <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 14 }}>▶ פעולה הבאה חדשה</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>פועל + אובייקט *</div>
+          <input value={text} onChange={e => setText(e.target.value)} placeholder="לשלוח / לפתוח / להתקשר..." style={inp} autoFocus />
+          <div style={{ fontSize: 11, color: C.textLight, marginTop: 4 }}>💡 כל משימה מתחילה בפועל ברור</div>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 6 }}>עדיפות</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[{ v: "today", l: "🔴 חיוני", c: C.red }, { v: "week", l: "🟡 השבוע", c: C.amber }, { v: "someday", l: "⚪ מתישהו", c: C.gray }].map(o => (
+              <button key={o.v} onClick={() => setTime(o.v)} style={{ flex: 1, padding: "6px 4px", borderRadius: 6, border: `1.5px solid ${time === o.v ? o.c : C.grayBorder}`, background: time === o.v ? o.c + "15" : C.white, color: time === o.v ? o.c : C.textLight, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{o.l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>📍 הקשר</div>
+            <Sel value={context} onChange={setContext} opts={CTX_OPTS} placeholder="בחר..." />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>⏱️ זמן</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {TIME_OPTS.map(o => <button key={o.v} onClick={() => setEstMins(o.v)} style={{ flex: 1, padding: "6px 2px", borderRadius: 6, border: `1.5px solid ${estMins === o.v ? C.purple : C.grayBorder}`, background: estMins === o.v ? C.purpleLight : C.white, color: estMins === o.v ? C.purple : C.textLight, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{o.l}</button>)}
             </div>
           </div>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>🧠 אנרגיה נדרשת</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {ENERGY_OPTS.map(o => <button key={o.v} onClick={() => setEnergy(o.v)} style={{ flex: 1, padding: "6px 4px", borderRadius: 6, border: `1.5px solid ${energy === o.v ? C.teal : C.grayBorder}`, background: energy === o.v ? C.tealLight : C.white, color: energy === o.v ? C.teal : C.textLight, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{o.l}</button>)}
+          </div>
+        </div>
+        {projects.filter(p => p.status === "active").length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>📁 פרויקט</div>
+            <Sel value={projId} onChange={v => { setProjId(v); setMilestoneId(""); }} opts={projects.filter(p => p.status === "active").map(p => ({ v: p.id, l: p.name }))} placeholder="ללא פרויקט" />
+          </div>
+        )}
+        {availableMilestones.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>📍 אבן דרך</div>
+            <Sel value={milestoneId} onChange={setMilestoneId} opts={availableMilestones.map(m => ({ v: m.id, l: m.text }))} placeholder="בחר..." />
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button onClick={() => setHardDate(h => !h)} style={{ flex: 1, padding: "7px 8px", borderRadius: 8, border: `1.5px solid ${hardDate ? C.red : C.grayBorder}`, background: hardDate ? C.redLight : C.white, color: hardDate ? C.red : C.textLight, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>📌 תאריך קשיח {hardDate ? "✓" : ""}</button>
+          <button onClick={() => setWaiting(w => !w)} style={{ flex: 1, padding: "7px 8px", borderRadius: 8, border: `1.5px solid ${waiting ? C.amber : C.grayBorder}`, background: waiting ? C.amberLight : C.white, color: waiting ? C.amber : C.textLight, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>⏳ ממתין {waiting ? "✓" : ""}</button>
+        </div>
+        {waiting && <input value={waitingFor} onChange={e => setWaitingFor(e.target.value)} placeholder="ממתין ל..." style={{ ...inp, marginBottom: 12, fontSize: 13 }} />}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={{ flex: 1, background: C.grayLight, color: C.textMid, border: "none", borderRadius: 10, padding: 12, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>ביטול</button>
+          <button onClick={save} disabled={!text.trim()} style={{ flex: 2, ...btn(!text.trim() ? C.grayBorder : C.purple, !text.trim() ? C.textLight : C.white), borderRadius: 10, padding: 12, fontSize: 14 }}>✓ הוסף</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          {groups.map(g => {
-            const open = all.filter(t => t.time === g.key && !t.completed);
-            const done = all.filter(t => t.time === g.key &&  t.completed);
-            if (!open.length && !done.length) return null;
+// ── ProjectsTab ───────────────────────────────────────────────────────────────
+function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal }) {
+  const [view, setView] = useState("projects");
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [editProject, setEditProject] = useState(null);
+  const [showNewAction, setShowNewAction] = useState(false);
+  const [newActionProjId, setNewActionProjId] = useState("");
+  const [filterCtx, setFilterCtx] = useState("");
+  const [filterEnergy, setFilterEnergy] = useState("");
+  const [expandedProj, setExpandedProj] = useState(null);
+
+  const saveProject = p => updProjects(prev => { const exists = prev.find(x => x.id === p.id); return exists ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]; });
+  const deleteProject = id => updProjects(prev => prev.filter(p => p.id !== id));
+  const completeTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
+  const deleteTask = id => updTasks(prev => prev.filter(t => t.id !== id));
+
+  const pendingTasks = tasks.filter(t => !t.completed);
+  const activeProjects = projects.filter(p => p.status === "active");
+  let naList = pendingTasks;
+  if (filterCtx) naList = naList.filter(t => t.context === filterCtx);
+  if (filterEnergy) naList = naList.filter(t => t.energy === filterEnergy);
+
+  const groups = [
+    { id: "today", label: "🔴 חיוני עכשיו", c: C.red, tasks: naList.filter(t => t.time === "today" && t.status !== "waiting") },
+    { id: "week", label: "🟡 השבוע", c: C.amber, tasks: naList.filter(t => t.time === "week" && t.status !== "waiting") },
+    { id: "waiting", label: "⏳ ממתין", c: C.orange, tasks: naList.filter(t => t.status === "waiting") },
+    { id: "someday", label: "⚪ מתישהו", c: C.gray, tasks: naList.filter(t => t.time === "someday" && t.status !== "waiting") },
+  ].filter(g => g.tasks.length > 0);
+
+  const projWithoutNA = activeProjects.filter(p => !pendingTasks.some(t => t.projectId === p.id && t.status !== "waiting"));
+  const projForTask = t => projects.find(p => p.id === t.projectId);
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {[{ v: "projects", l: "📁 פרויקטים" }, { v: "actions", l: "▶ פעולות הבאות" }].map(vv => (
+          <button key={vv.v} onClick={() => setView(vv.v)} style={{ flex: 1, padding: "9px 0", borderRadius: 8, border: `1.5px solid ${view === vv.v ? C.purple : C.grayBorder}`, background: view === vv.v ? C.purpleLight : C.white, color: view === vv.v ? C.purple : C.textLight, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{vv.l}</button>
+        ))}
+      </div>
+
+      {view === "projects" && (
+        <div>
+          {projWithoutNA.length > 0 && (
+            <div style={{ background: C.amberLight, borderRadius: 10, padding: "10px 14px", marginBottom: 12, border: `1.5px solid ${C.amber}30` }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.amber, marginBottom: 4 }}>⚠️ ללא פעולה הבאה (דקורציה!)</div>
+              {projWithoutNA.map(p => <div key={p.id} style={{ fontSize: 12, color: C.amber }}>• {p.name}</div>)}
+            </div>
+          )}
+          <button onClick={() => setShowNewProject(true)} style={{ width: "100%", ...btn(), borderRadius: 10, padding: 11, marginBottom: 14, fontSize: 14 }}>📁 פרויקט חדש</button>
+          {projects.length === 0 && (
+            <div style={{ textAlign: "center", padding: "48px 20px", color: C.textLight }}>
+              <div style={{ fontSize: 44, marginBottom: 12 }}>📁</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>אין פרויקטים עדיין</div>
+              <div style={{ fontSize: 12, marginTop: 6 }}>כל יעד שדורש יותר מצעד אחד הוא פרויקט</div>
+            </div>
+          )}
+          {Object.entries(PROJ_STATUS).map(([status, st]) => {
+            const grp = projects.filter(p => p.status === status);
+            if (grp.length === 0) return null;
             return (
-              <div key={g.key} style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                  <span>{g.icon}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: g.color }}>{g.label}</span>
-                  <span style={{ fontSize: 11, color: C.muted }}>({open.length} פתוחות{done.length ? `, ${done.length} הושלמו` : ""})</span>
+              <div key={status} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: st.c, marginBottom: 8 }}>{st.l.toUpperCase()} ({grp.length})</div>
+                {grp.map(proj => {
+                  const pTasks = pendingTasks.filter(t => t.projectId === proj.id);
+                  const activeMilestone = proj.milestones?.find(m => !m.completed);
+                  const totalM = proj.milestones?.length || 0;
+                  const doneM = proj.milestones?.filter(m => m.completed).length || 0;
+                  const isExpanded = expandedProj === proj.id;
+                  const stuckTasks = pTasks.filter(t => daysSince(t.createdAt) > 7);
+                  return (
+                    <div key={proj.id} style={{ background: C.white, borderRadius: 12, marginBottom: 8, border: `1.5px solid ${st.c}25`, overflow: "hidden" }}>
+                      <div style={{ padding: "12px 14px", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                        <button onClick={() => setExpandedProj(isExpanded ? null : proj.id)} style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", marginTop: 2, color: C.textLight }}>{isExpanded ? "▼" : "▶"}</button>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{proj.name}</div>
+                            <Chip label={st.l} color={st.c} small />
+                            {stuckTasks.length > 0 && <Chip label={`⚠️ ${stuckTasks.length} תקועות`} color={C.red} small />}
+                            {proj.deadline && <Chip label={`📅 ${proj.deadline}`} color={C.blue} small />}
+                          </div>
+                          {proj.outcome && <div style={{ fontSize: 12, color: C.textLight, marginTop: 3 }}>{proj.outcome.slice(0, 60)}{proj.outcome.length > 60 ? "…" : ""}</div>}
+                          {totalM > 0 && (
+                            <div style={{ marginTop: 6 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textLight, marginBottom: 3 }}>
+                                <span>{activeMilestone ? activeMilestone.text.slice(0, 35) : "כל אבני הדרך הושלמו!"}</span>
+                                <span>{doneM}/{totalM}</span>
+                              </div>
+                              <div style={{ height: 4, background: C.grayLight, borderRadius: 2 }}>
+                                <div style={{ height: 4, background: st.c, borderRadius: 2, width: `${totalM > 0 ? (doneM / totalM) * 100 : 0}%`, transition: "width 0.4s" }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button onClick={() => setEditProject(proj)} style={{ background: C.grayLight, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer", color: C.textMid }}>✏️</button>
+                          <button onClick={() => { if (window.confirm("מחק פרויקט?")) deleteProject(proj.id); }} style={{ background: C.redLight, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, cursor: "pointer", color: C.red }}>✕</button>
+                        </div>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ padding: "0 14px 14px" }}>
+                          {proj.done_definition && <div style={{ background: C.greenLight, borderRadius: 8, padding: "8px 10px", marginBottom: 8, fontSize: 12, color: C.green }}><strong>✓ בוצע כשׁ:</strong> {proj.done_definition}</div>}
+                          {proj.blockers && <div style={{ background: C.amberLight, borderRadius: 8, padding: "8px 10px", marginBottom: 8, fontSize: 12, color: C.amber }}>🚧 {proj.blockers}</div>}
+                          {pTasks.length > 0 && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 6 }}>פעולות הבאות:</div>
+                              {pTasks.map(t => (
+                                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: t.status === "waiting" ? C.amberLight : C.grayLight, borderRadius: 8, marginBottom: 4 }}>
+                                  <button onClick={() => completeTask(t.id)} style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${C.purple}`, background: C.white, cursor: "pointer", flexShrink: 0 }} />
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, color: C.text }}>{t.text}</div>
+                                    <div style={{ display: "flex", gap: 4, marginTop: 2, flexWrap: "wrap" }}>
+                                      {t.context && <Chip label={CTX_OPTS.find(o => o.v === t.context)?.l || t.context} color={C.teal} small />}
+                                      {t.estMins && <Chip label={`${t.estMins}′`} color={C.purple} small />}
+                                      {daysSince(t.createdAt) > 7 && <Chip label="⚠️ תקועה" color={C.red} small />}
+                                    </div>
+                                  </div>
+                                  <button onClick={() => deleteTask(t.id)} style={{ background: "none", border: "none", color: C.grayBorder, cursor: "pointer", fontSize: 13 }}>✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <button onClick={() => { setNewActionProjId(proj.id); setShowNewAction(true); }} style={{ width: "100%", background: C.purpleLight, color: C.purple, border: `1px dashed ${C.purple}50`, borderRadius: 8, padding: "7px 0", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>+ הוסף פעולה הבאה</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {view === "actions" && (
+        <div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+            <Sel value={filterCtx} onChange={setFilterCtx} opts={CTX_OPTS} placeholder="📍 כל הקשרים" />
+            <Sel value={filterEnergy} onChange={setFilterEnergy} opts={ENERGY_OPTS} placeholder="🧠 כל אנרגיה" />
+            {(filterCtx || filterEnergy) && <button onClick={() => { setFilterCtx(""); setFilterEnergy(""); }} style={{ background: C.redLight, color: C.red, border: "none", borderRadius: 8, padding: "7px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕</button>}
+          </div>
+          <button onClick={() => { setNewActionProjId(""); setShowNewAction(true); }} style={{ width: "100%", ...btn(), borderRadius: 10, padding: 11, marginBottom: 14, fontSize: 14 }}>▶ פעולה הבאה חדשה</button>
+          {naList.length === 0 && <div style={{ textAlign: "center", padding: "48px 20px", color: C.textLight }}><div style={{ fontSize: 44, marginBottom: 12 }}>🎯</div><div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>אין פעולות</div></div>}
+          {groups.map(g => (
+            <div key={g.id} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: g.c, marginBottom: 8 }}>{g.label} ({g.tasks.length})</div>
+              {g.tasks.map(t => {
+                const proj = projForTask(t);
+                return (
+                  <div key={t.id} style={{ background: C.white, borderRadius: 10, padding: "11px 14px", marginBottom: 6, border: `1px solid ${C.grayBorder}`, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <button onClick={() => completeTask(t.id)} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${C.purple}`, background: C.white, cursor: "pointer", flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, color: C.text }}>{t.text}</div>
+                      {proj && <div style={{ fontSize: 11, color: C.purple, fontWeight: 600, marginTop: 2 }}>📁 {proj.name}</div>}
+                      <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                        {t.context && <Chip label={CTX_OPTS.find(o => o.v === t.context)?.l || t.context} color={C.teal} small />}
+                        {t.estMins && <Chip label={`${t.estMins}′`} color={C.purple} small />}
+                        {t.hardDate && <Chip label="📌 קשיח" color={C.red} small />}
+                        {t.waitingFor && <Chip label={`⏳ ${t.waitingFor}`} color={C.orange} small />}
+                        {daysSince(t.createdAt) > 7 && <Chip label={`⚠️ ${daysSince(t.createdAt)}ד׳`} color={C.red} small />}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {setCalendarModal && <button onClick={() => setCalendarModal({ title: t.text })} style={{ background: C.blueLight, color: C.blue, border: "none", borderRadius: 6, padding: "4px 7px", fontSize: 12, cursor: "pointer" }}>📅</button>}
+                      <button onClick={() => deleteTask(t.id)} style={{ background: "none", border: "none", color: C.grayBorder, cursor: "pointer", fontSize: 15 }}>✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {tasks.filter(t => t.completed && t.completedAt?.startsWith(TODAY)).length > 0 && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.green, marginBottom: 8 }}>✅ הושלמו היום</div>
+              {tasks.filter(t => t.completed && t.completedAt?.startsWith(TODAY)).map(t => (
+                <div key={t.id} style={{ background: C.greenLight, borderRadius: 10, padding: "9px 14px", marginBottom: 5, display: "flex", gap: 8, fontSize: 13, color: C.green }}>
+                  <span>✅</span><span style={{ textDecoration: "line-through", opacity: 0.7 }}>{t.text}</span>
                 </div>
-                {open.map(t => <TaskItem key={t.id} task={t} color={g.color} bg={g.bg} onToggle={() => toggle(t.id)} onDelete={() => del(t.id)} />)}
-                {done.slice(0, 3).map(t => <TaskItem key={t.id} task={t} color={g.color} bg={g.bg} onToggle={() => toggle(t.id)} onDelete={() => del(t.id)} />)}
-              </div>
-            );
-          })}
-
-          {all.length === 0 && (
-            <div style={{ textAlign: "center", color: C.muted, fontSize: 14, marginTop: 40 }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>🎯</div>
-              <div>אין משימות עדיין</div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ── FocusTab ─────────────────────────────────────────────────────────────────
-    function FocusTab({ tasks }) {
-      const MODES = {
-        work:  { label: "עבודה",        duration: 25 * 60, color: C.primary },
-        short: { label: "הפסקה קצרה",  duration:  5 * 60, color: C.success },
-        long:  { label: "הפסקה ארוכה", duration: 15 * 60, color: C.warning },
-      };
-
-      const [mode, setMode] = useState("work");
-      const [running, setRunning] = useState(false);
-      const [seconds, setSeconds] = useState(25 * 60);
-      const [sessions, setSessions] = usePersist("pomodoro-" + today(), 0);
-      const [selected, setSelected] = useState("");
-      const interval = useRef(null);
-
-      const todayTasks = Object.values(tasks || {}).filter(t => t.time === "today" && !t.completed);
-      const mc = MODES[mode].color;
-
-      useEffect(() => {
-        if (running) {
-          interval.current = setInterval(() => {
-            setSeconds(s => {
-              if (s <= 1) {
-                clearInterval(interval.current);
-                setRunning(false);
-                if (mode === "work") setSessions(p => (p || 0) + 1);
-                return 0;
-              }
-              return s - 1;
-            });
-          }, 1000);
-        }
-        return () => clearInterval(interval.current);
-      }, [running, mode]);
-
-      const switchMode = m => { setRunning(false); clearInterval(interval.current); setMode(m); setSeconds(MODES[m].duration); };
-      const reset = () => { setRunning(false); clearInterval(interval.current); setSeconds(MODES[mode].duration); };
-
-      const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-      const ss = String(seconds % 60).padStart(2, "0");
-      const r = 90, circ = 2 * Math.PI * r;
-      const pct = 1 - seconds / MODES[mode].duration;
-
-      return (
-        <div style={{ padding: 16 }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 20, background: C.card, borderRadius: 12, padding: 4, border: `1px solid ${C.border}` }}>
-            {Object.entries(MODES).map(([k, m]) => (
-              <button key={k} onClick={() => switchMode(k)} style={{
-                flex: 1, padding: "8px 0", borderRadius: 9, border: "none", cursor: "pointer",
-                background: mode === k ? mc : "transparent", color: mode === k ? "#fff" : C.muted,
-                fontSize: 12, fontWeight: 700, transition: "all 0.2s",
-              }}>{m.label}</button>
-            ))}
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
-            <div style={{ position: "relative", width: 220, height: 220 }}>
-              <svg width={220} height={220} style={{ transform: "rotate(-90deg)" }}>
-                <circle cx={110} cy={110} r={r} fill="none" stroke={C.border} strokeWidth={8} />
-                <circle cx={110} cy={110} r={r} fill="none" stroke={mc} strokeWidth={8}
-                  strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)}
-                  strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.5s" }} />
-              </svg>
-              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                <div style={{ fontSize: 48, fontWeight: 700, color: C.text, fontFamily: "monospace", letterSpacing: 2 }}>{mm}:{ss}</div>
-                <div style={{ fontSize: 13, color: C.muted }}>{MODES[mode].label}</div>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 20 }}>
-            <button onClick={reset} style={{ width: 48, height: 48, borderRadius: 14, border: `1px solid ${C.border}`, background: C.card, fontSize: 20, cursor: "pointer" }}>↺</button>
-            <button onClick={() => setRunning(r => !r)} style={{ width: 130, height: 48, borderRadius: 14, border: "none", background: mc, color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer" }}>
-              {running ? "⏸ השהה" : "▶ התחל"}
-            </button>
-          </div>
-
-          <div style={{ ...card, textAlign: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 4 }}>סשנים היום</div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: mc }}>{sessions || 0} 🍅</div>
-          </div>
-
-          {todayTasks.length > 0 && (
-            <div style={card}>
-              <div style={{ ...label, marginBottom: 8 }}>📌 ממוקד על</div>
-              <select value={selected} onChange={e => setSelected(e.target.value)} style={{ ...inp, width: "100%" }}>
-                <option value="">בחר משימה...</option>
-                {todayTasks.map(t => <option key={t.id} value={t.id}>{t.text}</option>)}
-              </select>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // ── MetricsTab ────────────────────────────────────────────────────────────────
-    function BarChart({ data, max, color, dayLabels }) {
-      const W = 36, GAP = 6, H = 100;
-      return (
-        <svg width={(W + GAP) * data.length} height={H + 20} style={{ display: "block" }}>
-          {data.map((v, i) => {
-            const barH = v ? Math.max(4, (v / max) * H) : 0;
-            const x = i * (W + GAP);
-            return (
-              <g key={i}>
-                <rect x={x} y={H - barH} width={W} height={barH} rx={4} fill={v ? color : C.border} />
-                {v && <text x={x + W / 2} y={H - barH - 4} textAnchor="middle" fontSize={10} fill={color}>{v}</text>}
-                <text x={x + W / 2} y={H + 14} textAnchor="middle" fontSize={10} fill={C.muted}>{dayLabels[i]}</text>
-              </g>
-            );
-          })}
-        </svg>
-      );
-    }
-
-    function MetricsTab({ tasks }) {
-      const [history, setHistory] = useState([]);
-
-      useEffect(() => {
-        const days = Array.from({ length: 7 }, (_, i) => {
-          const d = new Date(); d.setDate(d.getDate() - (6 - i)); return toDateStr(d);
-        });
-        Promise.all(days.map(ds =>
-          new Promise(res => db.ref(`adhd/${USER}/today/${ds}`).once('value', snap => res({ date: ds, ...(snap.val() || {}) })))
-        )).then(setHistory);
-      }, []);
-
-      const all = Object.values(tasks || {});
-      const completedThisWeek = all.filter(t => t.completed && t.completedAt && Date.now() - t.completedAt < 7 * 24 * 3600 * 1000).length;
-      const openToday = all.filter(t => t.time === "today" && !t.completed).length;
-
-      const DAY = ["א","ב","ג","ד","ה","ו","ש"];
-      const dayLabels = history.map(h => DAY[new Date(h.date + "T12:00:00").getDay()]);
-      const energyData = history.map(h => h.energy || 0);
-      const sleepData  = history.map(h => h.sleep ? parseFloat(h.sleep) : 0);
-
-      return (
-        <div style={{ padding: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-            {[
-              ["✅ הושלם השבוע", completedThisWeek, C.success],
-              ["🎯 פתוח היום",   openToday,         C.danger],
-              ["📝 סה״כ משימות", all.length,         C.primary],
-              ["📥 ממתינות",     all.filter(t => !t.completed).length, C.warning],
-            ].map(([l, v, c]) => (
-              <div key={l} style={{ ...card, textAlign: "center" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: c, fontFamily: "monospace" }}>{v}</div>
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{l}</div>
-              </div>
-            ))}
-          </div>
-
-          <div style={card}>
-            <div style={{ ...label, marginBottom: 12 }}>⚡ אנרגיה — 7 ימים (מקס׳ 5)</div>
-            <BarChart data={energyData} max={5} color={C.primary} dayLabels={dayLabels} />
-          </div>
-
-          <div style={card}>
-            <div style={{ ...label, marginBottom: 12 }}>😴 שינה — 7 ימים (שעות)</div>
-            <BarChart data={sleepData} max={12} color={C.success} dayLabels={dayLabels} />
-          </div>
-        </div>
-      );
-    }
-
-    // ── App ───────────────────────────────────────────────────────────────────────
-    function App() {
-      const [tab, setTab] = useState("today");
-      const [tasks, setTasks] = usePersist("adhd-tasks-v1", {});
-
-      const addTask = ({ text, time, nextAction }) => {
-        const id = uid();
-        setTasks(p => ({ ...(p || {}), [id]: { id, text, time, nextAction, completed: false, createdAt: Date.now(), completedAt: null } }));
-      };
-
-      const TABS = [
-        ["today",   "היום",    "☀️"],
-        ["inbox",   "ל״ל",     "📥"],
-        ["tasks",   "משימות",  "✅"],
-        ["focus",   "פוקוס",   "🍅"],
-        ["metrics", "מדדים",   "📊"],
-      ];
-
-      return (
-        <div style={{ minHeight: "100vh", background: C.bg, fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", direction: "rtl", color: C.text, paddingBottom: 80 }}>
-          <div style={{ padding: "14px 16px 10px", background: "#fff", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 20 }}>
-            <div style={{ maxWidth: 520, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: C.primary }}>🧠 מערכת ADHD</div>
-                <div style={{ fontSize: 11, color: C.muted }}>היי מתן 👋</div>
-              </div>
-              <div style={{ fontSize: 12, color: C.muted }}>
-                {new Date().toLocaleDateString("he-IL", { weekday: "short", day: "numeric", month: "short" })}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ maxWidth: 520, margin: "0 auto" }}>
-            {tab === "today"   && <TodayTab />}
-            {tab === "inbox"   && <InboxTab onAddTask={addTask} />}
-            {tab === "tasks"   && <TasksTab tasks={tasks} setTasks={setTasks} addTask={addTask} />}
-            {tab === "focus"   && <FocusTab tasks={tasks} />}
-            {tab === "metrics" && <MetricsTab tasks={tasks} />}
-          </div>
-
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: `1px solid ${C.border}`, padding: "8px 0 12px", zIndex: 20 }}>
-            <div style={{ maxWidth: 520, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(5, 1fr)" }}>
-              {TABS.map(([k, l, e]) => (
-                <button key={k} onClick={() => setTab(k)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 0" }}>
-                  <span style={{ fontSize: 20 }}>{e}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: tab === k ? C.primary : C.muted }}>{l}</span>
-                  {tab === k && <div style={{ width: 4, height: 4, borderRadius: 2, background: C.primary }} />}
-                </button>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {showNewProject && <ProjectModal onClose={() => setShowNewProject(false)} onSave={saveProject} />}
+      {editProject && <ProjectModal project={editProject} onClose={() => setEditProject(null)} onSave={saveProject} />}
+      {showNewAction && <NextActionModal projects={projects} initialProjectId={newActionProjId} onClose={() => setShowNewAction(false)} onSave={t => updTasks(prev => [...prev, t])} />}
+    </div>
+  );
+}
+
+// ── TodayTab ──────────────────────────────────────────────────────────────────
+function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setWeeklyReview, setCalendarModal }) {
+  const todayTasks = tasks.filter(t => !t.completed && t.time === "today" && t.status !== "waiting");
+  const doneToday = tasks.filter(t => t.completed && t.completedAt?.startsWith(TODAY));
+  const projWithoutNA = projects.filter(p => p.status === "active" && !tasks.some(t => t.projectId === p.id && !t.completed && t.status !== "waiting"));
+  const energyLevel = daily.energy || 0;
+  const suggestedEnergy = energyLevel >= 4 ? "high" : energyLevel >= 2 ? "medium" : "low";
+  const suggestedTasks = tasks.filter(t => !t.completed && t.energy === suggestedEnergy && t.time !== "someday").slice(0, 3);
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>🌅 מצב היום</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          {[{ k: "energy", label: "⚡ אנרגיה" }, { k: "sleep", label: "😴 שינה" }].map(f => (
+            <div key={f.k}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>{f.label}</div>
+              <Stars value={daily[f.k] || 0} onChange={v => updDaily({ ...daily, [f.k]: v })} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[{ k: "meds", label: "💊 תרופות" }, { k: "exercised", label: "🏃 ספורט" }].map(f => (
+            <div key={f.k} style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>{f.label}</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[true, false].map(val => { const ac = daily[f.k] === val; const cc = val ? C.green : C.red; return <button key={String(val)} onClick={() => updDaily({ ...daily, [f.k]: val })} style={{ flex: 1, padding: "6px 4px", borderRadius: 6, border: `1.5px solid ${ac ? cc : C.grayBorder}`, background: ac ? cc + "15" : C.white, color: ac ? cc : C.textLight, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{val ? "כן" : "לא"}</button>; })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>🎯 שלושת הדברים להיום</div>
+          {doneToday.length > 0 && <Chip label={`✓ ${doneToday.length}`} color={C.green} />}
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.purple, marginBottom: 5 }}>🔵 עיקרית</div>
+          <input value={daily.main || ""} onChange={e => updDaily({ ...daily, main: e.target.value })} placeholder="המשימה הכי חשובה להיום..." style={{ ...inp, border: `2px solid ${C.purpleLight}` }} />
+        </div>
+        {["small1", "small2"].map((k, i) => (
+          <div key={k} style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>⚫ {i + 2}</div>
+            <input value={daily[k] || ""} onChange={e => updDaily({ ...daily, [k]: e.target.value })} placeholder="משימה קטנה..." style={inp} />
+          </div>
+        ))}
+      </div>
+
+      {daily.energy > 0 && suggestedTasks.length > 0 && (
+        <div style={{ ...card, border: `1.5px solid ${C.teal}25`, background: C.tealLight + "40" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.teal, marginBottom: 8 }}>💡 מתאים לאנרגיה שלך ({ENERGY_OPTS.find(o => o.v === suggestedEnergy)?.l})</div>
+          {suggestedTasks.map(t => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${C.tealLight}` }}>
+              <button onClick={() => completeTask(t.id)} style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${C.teal}`, background: C.white, cursor: "pointer", flexShrink: 0 }} />
+              <div style={{ flex: 1, fontSize: 13, color: C.text }}>{t.text}</div>
+              {t.estMins && <Chip label={`${t.estMins}′`} color={C.teal} small />}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {projWithoutNA.length > 0 && (
+        <div style={{ ...card, background: C.amberLight, border: `1.5px solid ${C.amber}30` }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.amber, marginBottom: 4 }}>⚠️ פרויקטים ללא פעולה הבאה</div>
+          {projWithoutNA.map(p => <div key={p.id} style={{ fontSize: 12, color: C.amber }}>• {p.name}</div>)}
+          <button onClick={() => setTab("projects")} style={{ marginTop: 8, ...btn(C.amber), padding: "6px 12px", fontSize: 12, borderRadius: 6 }}>תקן →</button>
+        </div>
+      )}
+
+      {todayTasks.length > 0 && (
+        <div style={card}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 10 }}>🔴 חיוני עכשיו</div>
+          {todayTasks.slice(0, 5).map(t => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${C.grayLight}` }}>
+              <button onClick={() => completeTask(t.id)} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${C.purple}`, background: C.white, cursor: "pointer", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: C.text }}>{t.text}</div>
+                <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                  {t.estMins && <Chip label={`${t.estMins}′`} color={C.purple} small />}
+                  {t.context && <Chip label={CTX_OPTS.find(o => o.v === t.context)?.l || t.context} color={C.teal} small />}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+        <button onClick={() => setWeeklyReview(true)} style={{ ...card, marginBottom: 0, cursor: "pointer", textAlign: "center", border: `1.5px solid ${C.purple}25` }}>
+          <div style={{ fontSize: 20, marginBottom: 4 }}>📋</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.purple }}>סקירה שבועית</div>
+        </button>
+        <button onClick={() => setTab("focus")} style={{ ...card, marginBottom: 0, cursor: "pointer", textAlign: "center", border: `1.5px solid ${C.teal}25` }}>
+          <div style={{ fontSize: 20, marginBottom: 4 }}>⏱️</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.teal }}>פוקוס</div>
+        </button>
+      </div>
+
+      <div style={{ ...card, border: `1.5px solid ${daily.closed ? C.green : C.grayBorder}`, background: daily.closed ? C.greenLight : C.white }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: daily.closed ? C.green : C.text }}>{daily.closed ? "✅ סגירה יומית בוצעה" : "🌙 סגירה יומית — 5 דק׳"}</div>
+            <div style={{ fontSize: 12, color: C.textLight, marginTop: 2 }}>{daily.closed ? `ב-${daily.closedAt}` : "אינבוקס + בחר פעולה הבאה + קבע 3 למחר"}</div>
+          </div>
+          {!daily.closed && <button onClick={() => { updDaily({ ...daily, closed: true, closedAt: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) }); setTab("inbox"); }} style={{ ...btn(), flexShrink: 0, padding: "8px 12px", fontSize: 13 }}>התחל →</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── InboxTab ──────────────────────────────────────────────────────────────────
+function InboxTab({ inbox, addToInbox, setProcessItem, updInbox }) {
+  const [text, setText] = useState("");
+  const inputRef = useRef(null);
+  const add = () => { if (!text.trim()) return; addToInbox(text.trim()); setText(""); inputRef.current?.focus(); };
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>⚡ לכידה מהירה</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input ref={inputRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} placeholder="מה עלה לך בראש? לוכדים קודם, מחליטים אחר כך..." style={{ ...inp, flex: 1 }} autoFocus />
+          <button onClick={add} style={{ ...btn(), padding: "9px 18px", fontSize: 18, flexShrink: 0 }}>+</button>
+        </div>
+        <div style={{ fontSize: 11, color: C.textLight, marginTop: 8 }}>💡 Enter ללכידה מהירה</div>
+      </div>
+      {inbox.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "48px 20px", color: C.textLight }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>🎉</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>אינבוקס ריק!</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>יעד: עיבוד עד 48 שעות</div>
+        </div>
+      ) : (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.textMid }}>📥 {inbox.length} פריטים לעיבוד</div>
+            <button onClick={() => setProcessItem(inbox[0])} style={{ ...btn(), padding: "6px 14px", fontSize: 12 }}>עבד הבא ▶</button>
+          </div>
+          {inbox.map((item, i) => (
+            <div key={item.id} style={{ background: C.white, borderRadius: 10, padding: "11px 14px", marginBottom: 8, border: `1px solid ${C.grayBorder}`, display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 24, height: 24, borderRadius: "50%", background: C.grayLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: C.textLight, flexShrink: 0 }}>{i + 1}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, color: C.text }}>{item.text}</div>
+                {daysSince(item.ts) > 1 && <div style={{ fontSize: 11, color: C.red, marginTop: 2 }}>⚠️ {daysSince(item.ts)} ימים באינבוקס</div>}
+              </div>
+              <button onClick={() => setProcessItem(item)} style={{ ...btn(), padding: "5px 10px", fontSize: 12 }}>עבד</button>
+              <button onClick={() => updInbox(inbox.filter(x => x.id !== item.id))} style={{ background: C.redLight, color: C.red, border: "none", borderRadius: 6, padding: "5px 8px", fontSize: 12, cursor: "pointer" }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── FocusTab ──────────────────────────────────────────────────────────────────
+function FocusTab({ tasks }) {
+  const MODES = [
+    { id: "work", label: "🍅 פוקוס", secs: 25*60, color: C.purple },
+    { id: "short", label: "☕ הפסקה", secs: 5*60, color: C.green },
+    { id: "long", label: "🌿 ארוכה", secs: 15*60, color: C.teal },
+  ];
+  const [modeId, setModeId] = useState("work");
+  const [seconds, setSeconds] = useState(25*60);
+  const [running, setRunning] = useState(false);
+  const [sessions, setSessions] = useState(0);
+  const [taskText, setTaskText] = useState("");
+  const interval = useRef(null);
+  const mode = MODES.find(m => m.id === modeId);
+  const todayTasks = (tasks || []).filter(t => t.time === "today" && !t.completed);
+  const R = 88, CIRC = 2 * Math.PI * R;
+  const progress = 1 - seconds / mode.secs;
+
+  const switchMode = m => { setModeId(m.id); setSeconds(m.secs); setRunning(false); clearInterval(interval.current); };
+  const reset = () => { setRunning(false); clearInterval(interval.current); setSeconds(mode.secs); };
+
+  useEffect(() => {
+    if (running) {
+      interval.current = setInterval(() => {
+        setSeconds(s => {
+          if (s <= 1) { clearInterval(interval.current); setRunning(false); if (modeId === "work") setSessions(p => p + 1); return 0; }
+          return s - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval.current);
+  }, [running, modeId]);
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={card}>
+        <div style={{ display: "flex", gap: 5, marginBottom: 16 }}>
+          {MODES.map(m => <button key={m.id} onClick={() => switchMode(m)} style={{ flex: 1, padding: "7px 2px", borderRadius: 8, border: `1.5px solid ${modeId === m.id ? m.color : C.grayBorder}`, background: modeId === m.id ? m.color + "12" : C.white, color: modeId === m.id ? m.color : C.textLight, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{m.label}</button>)}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 18 }}>
+          <svg width="210" height="210" style={{ direction: "ltr" }}>
+            <circle cx="105" cy="105" r={R} fill="none" stroke={C.grayLight} strokeWidth="10" />
+            <circle cx="105" cy="105" r={R} fill="none" stroke={mode.color} strokeWidth="10" strokeLinecap="round"
+              strokeDasharray={CIRC} strokeDashoffset={CIRC * (1 - progress)}
+              transform="rotate(-90 105 105)" style={{ transition: running ? "stroke-dashoffset 0.9s linear" : "none" }} />
+            <text x="105" y="98" textAnchor="middle" fontSize="38" fontWeight="800" fill={C.text} fontFamily="inherit">{pad(Math.floor(seconds/60))}:{pad(seconds%60)}</text>
+            <text x="105" y="122" textAnchor="middle" fontSize="13" fill={C.textLight} fontFamily="inherit">{mode.label}</text>
+            {sessions > 0 && <text x="105" y="144" textAnchor="middle" fontSize="13" fill={mode.color} fontFamily="inherit">🍅 {sessions}</text>}
+          </svg>
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button onClick={() => setRunning(r => !r)} style={{ ...btn(running ? C.amber : mode.color), padding: "11px 28px", fontSize: 15, borderRadius: 10 }}>{running ? "⏸ עצור" : "▶ התחל"}</button>
+            <button onClick={reset} style={{ background: C.grayLight, color: C.textMid, border: "none", borderRadius: 10, padding: "11px 14px", fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}>↺</button>
           </div>
         </div>
-      );
-    }
+        {todayTasks.length > 0 && (
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 6 }}>🎯 על מה אתה עובד?</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {todayTasks.slice(0, 4).map(t => <button key={t.id} onClick={() => setTaskText(t.text)} style={{ background: taskText === t.text ? C.purpleLight : C.grayLight, color: taskText === t.text ? C.purple : C.textMid, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{t.text.slice(0, 20)}{t.text.length > 20 ? "…" : ""}</button>)}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-  </script>
+// ── MetricsTab ────────────────────────────────────────────────────────────────
+function MetricsTab({ tasks, projects, inbox, daily, history }) {
+  const doneToday = tasks.filter(t => t.completed && t.completedAt?.startsWith(TODAY)).length;
+  const pending = tasks.filter(t => !t.completed);
+  const activeProjs = projects.filter(p => p.status === "active");
+  const projsWithNA = activeProjs.filter(p => pending.some(t => t.projectId === p.id && t.status !== "waiting")).length;
+  const projsNAPercent = activeProjs.length > 0 ? Math.round((projsWithNA / activeProjs.length) * 100) : 100;
+  const stuckTasks = pending.filter(t => daysSince(t.createdAt) > 7).length;
+  const allMilestones = projects.flatMap(p => p.milestones || []);
+  const doneMilestones = allMilestones.filter(m => m.completed).length;
+
+  const kpis = [
+    { label: "📁 פרויקטים עם NA", value: `${projsNAPercent}%`, good: projsNAPercent === 100, color: C.green },
+    { label: "📥 אינבוקס", value: inbox.length, good: inbox.length === 0, color: C.blue },
+    { label: "✅ הושלמו היום", value: doneToday, good: doneToday >= 3, color: C.purple },
+    { label: "📍 מיילסטונים", value: `${doneMilestones}/${allMilestones.length}`, good: allMilestones.length > 0, color: C.teal },
+    { label: "⚠️ תקועות >7י׳", value: stuckTasks, good: stuckTasks === 0, color: C.red },
+    { label: "⚡ אנרגיה היום", value: `${daily.energy || 0}/5`, good: (daily.energy || 0) >= 3, color: C.purple },
+    { label: "🌙 סגירה יומית", value: daily.closed ? "✓" : "—", good: daily.closed, color: C.green },
+    { label: "📝 סה״כ משימות", value: tasks.length, good: true, color: C.gray },
+  ];
+
+  const chartData = history.slice(-7).map(d => ({ date: d.date.slice(5).replace("-", "/"), done: d.done || 0, energy: d.energy || 0 }));
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>📊 מדדי מערכת</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {kpis.map(m => (
+            <div key={m.label} style={{ background: m.good ? m.color + "0D" : C.redLight, borderRadius: 10, padding: "10px 12px", border: `1px solid ${m.good ? m.color + "25" : C.red + "40"}` }}>
+              <div style={{ fontSize: 10, color: C.textLight, marginBottom: 3 }}>{m.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: m.good ? m.color : C.red }}>{m.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {LineChart && chartData.length >= 2 ? (
+        <div style={card}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 12 }}>📈 7 ימים — משימות ואנרגיה</div>
+          <ResponsiveContainer width="100%" height={150}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: -20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.grayBorder} />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: C.textLight }} />
+              <YAxis tick={{ fontSize: 10, fill: C.textLight }} />
+              <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
+              <Line type="monotone" dataKey="done" name="משימות" stroke={C.purple} strokeWidth={2.5} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="energy" name="אנרגיה" stroke={C.amber} strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div style={{ ...card, textAlign: "center", padding: 28 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+          <div style={{ fontSize: 13, color: C.textLight }}>גרפים יופיעו לאחר 2 ימי שימוש</div>
+        </div>
+      )}
+
+      <div style={{ ...card, background: C.purpleLight, border: `1px solid ${C.purple}20` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.purple, marginBottom: 6 }}>💡 עקרונות מפתח</div>
+        <div style={{ fontSize: 12, color: C.textMid, lineHeight: 1.8 }}>
+          ✓ כל פרויקט = תוצאה ברורה + פעולה הבאה חיה<br />
+          ✓ פרויקט ללא Next Action = "דקורציה"<br />
+          ✓ זמן עיבוד אינבוקס &lt; 48 שעות<br />
+          ✓ יומן = רק מה שקשור לזמן
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SettingsTab ───────────────────────────────────────────────────────────────
+function SettingsTab({ settings, updSettings, tasks, inbox, projects, updTasks, updInbox, updProjects, setWeeklyReview }) {
+  const [confirmClear, setConfirmClear] = useState(false);
+  const reqNotif = async () => {
+    if ("Notification" in window) {
+      const p = await Notification.requestPermission();
+      if (p === "granted") { updSettings({ ...settings, notif: true }); new Notification("🧠 מערכת ADHD", { body: "התראות הופעלו!" }); }
+    }
+  };
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>🔔 תזכורות</div>
+        {[{ k: "morningTime", label: "⏰ פתיחת יום", def: "08:00" }, { k: "eveningTime", label: "🌙 סגירה יומית", def: "21:30" }].map(f => (
+          <div key={f.k} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>{f.label}</div>
+            <input type="time" value={settings[f.k] || f.def} onChange={e => updSettings({ ...settings, [f.k]: e.target.value })} style={{ border: `1.5px solid ${C.grayBorder}`, borderRadius: 8, padding: "8px 12px", fontSize: 14, outline: "none", direction: "ltr", background: C.white }} />
+          </div>
+        ))}
+        <button onClick={reqNotif} style={{ width: "100%", background: settings.notif ? C.greenLight : C.purple, color: settings.notif ? C.green : C.white, border: settings.notif ? `1.5px solid ${C.green}` : "none", borderRadius: 8, padding: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          {settings.notif ? "✅ התראות פעילות" : "🔔 הפעל התראות"}
+        </button>
+      </div>
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>📋 סקירה שבועית</div>
+        <button onClick={() => setWeeklyReview(true)} style={{ width: "100%", ...btn(), borderRadius: 8, padding: 11 }}>▶ התחל סקירה שבועית</button>
+      </div>
+      <div style={{ ...card, border: `1.5px solid ${C.redLight}` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.red, marginBottom: 10 }}>⚠️ איפוס נתונים</div>
+        {!confirmClear
+          ? <button onClick={() => setConfirmClear(true)} style={{ width: "100%", background: C.redLight, color: C.red, border: "none", borderRadius: 8, padding: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>מחק הכל</button>
+          : <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { updTasks([]); updInbox([]); updProjects([]); setConfirmClear(false); }} style={{ flex: 1, ...btn(C.red), padding: 9, fontSize: 13 }}>כן, מחק</button>
+            <button onClick={() => setConfirmClear(false)} style={{ flex: 1, background: C.grayLight, color: C.textMid, border: "none", borderRadius: 8, padding: 9, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>ביטול</button>
+          </div>
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── ProcessModal ──────────────────────────────────────────────────────────────
+function ProcessModal({ item, projects, onClose, onProcess }) {
+  const [decision, setDecision] = useState({ type: null, nextAction: "", time: "week", context: "", estMins: 15, energy: "medium", projectId: "", isProject: false });
+  const types = { task: { label: "▶ פעולה הבאה", color: C.purple, bg: C.purpleLight }, reference: { label: "📚 מידע", color: C.amber, bg: C.amberLight }, delete: { label: "🗑️ מחיקה", color: C.red, bg: C.redLight } };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 100 }} onClick={onClose}>
+      <div style={{ background: C.white, borderRadius: "20px 20px 0 0", padding: 20, width: "100%", maxWidth: 500, maxHeight: "85vh", overflowY: "auto", direction: "rtl" }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 40, height: 4, background: C.grayBorder, borderRadius: 2, margin: "0 auto 14px" }} />
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>🔄 עבד פריט</div>
+        <div style={{ background: C.grayLight, borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 14, color: C.textMid }}>{item.text}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>בחר קטגוריה:</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 12 }}>
+          {Object.entries(types).map(([k, v]) => <button key={k} onClick={() => setDecision(p => ({ ...p, type: k }))} style={{ padding: 10, borderRadius: 10, border: `2px solid ${decision.type === k ? v.color : C.grayBorder}`, background: decision.type === k ? v.bg : C.white, color: decision.type === k ? v.color : C.textLight, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{v.label}</button>)}
+        </div>
+        {decision.type === "task" && (
+          <div>
+            <input value={decision.nextAction} onChange={e => setDecision(p => ({ ...p, nextAction: e.target.value }))} placeholder="פועל + אובייקט..." style={{ ...inp, marginBottom: 8, fontSize: 13 }} />
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              {[{ v: "today", l: "🔴 חיוני", c: C.red }, { v: "week", l: "🟡 השבוע", c: C.amber }, { v: "someday", l: "⚪ מתישהו", c: C.gray }].map(o => <button key={o.v} onClick={() => setDecision(p => ({ ...p, time: o.v }))} style={{ flex: 1, padding: "6px 2px", borderRadius: 6, border: `1.5px solid ${decision.time === o.v ? o.c : C.grayBorder}`, background: decision.time === o.v ? o.c + "15" : C.white, color: decision.time === o.v ? o.c : C.textLight, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{o.l}</button>)}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: C.purpleLight, borderRadius: 8, marginBottom: 8 }}>
+              <button onClick={() => setDecision(p => ({ ...p, isProject: !p.isProject }))} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${C.purple}`, background: decision.isProject ? C.purple : C.white, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.white, fontSize: 12 }}>{decision.isProject ? "✓" : ""}</button>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.purple }}>📁 זהו פרויקט (דורש יותר מצעד אחד)</div>
+            </div>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={{ flex: 1, background: C.grayLight, color: C.textMid, border: "none", borderRadius: 10, padding: 12, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>ביטול</button>
+          <button onClick={() => decision.type && onProcess(item, decision)} disabled={!decision.type} style={{ flex: 2, background: decision.type ? C.purple : C.grayBorder, color: decision.type ? C.white : C.textLight, border: "none", borderRadius: 10, padding: 12, fontSize: 14, fontWeight: 700, cursor: decision.type ? "pointer" : "default", fontFamily: "inherit" }}>
+            {decision.type ? `✓ ${types[decision.type]?.label}` : "בחר קטגוריה"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── WeeklyReviewModal ─────────────────────────────────────────────────────────
+function WeeklyReviewModal({ inbox, tasks, projects, onClose, onNav }) {
+  const [step, setStep] = useState(0);
+  const pending = tasks.filter(t => !t.completed);
+  const doneThisWeek = tasks.filter(t => t.completedAt && Date.now() - new Date(t.completedAt) < 7*24*60*60*1000).length;
+  const activeProjs = projects.filter(p => p.status === "active");
+  const projsNoNA = activeProjs.filter(p => !pending.some(t => t.projectId === p.id && t.status !== "waiting"));
+
+  const STEPS = [
+    { icon: "📥", title: "שלב 1: נקה את האינבוקס", content: <div>
+      <div style={{ background: inbox.length === 0 ? C.greenLight : C.amberLight, borderRadius: 12, padding: 20, textAlign: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>{inbox.length === 0 ? "🎉" : "📥"}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: inbox.length === 0 ? C.green : C.amber }}>{inbox.length === 0 ? "האינבוקס ריק!" : `${inbox.length} פריטים לעיבוד`}</div>
+      </div>
+      {inbox.length > 0 && <button onClick={() => { onClose(); onNav("inbox"); }} style={{ width: "100%", ...btn(), borderRadius: 10, padding: 11 }}>📥 עבור לאינבוקס →</button>}
+    </div> },
+    { icon: "📁", title: "שלב 2: בדוק פרויקטים", content: <div>
+      {projsNoNA.length > 0 && <div style={{ background: C.redLight, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.red, marginBottom: 4 }}>🚨 ללא פעולה הבאה (דקורציה!):</div>
+        {projsNoNA.map(p => <div key={p.id} style={{ fontSize: 12, color: C.red }}>• {p.name}</div>)}
+      </div>}
+      <div style={{ background: C.greenLight, borderRadius: 8, padding: 10, fontSize: 13, color: C.green, fontWeight: 600 }}>✅ הושלמו השבוע: {doneThisWeek} פעולות</div>
+      <button onClick={() => { onClose(); onNav("projects"); }} style={{ width: "100%", ...btn(C.purpleMid), borderRadius: 10, padding: 10, marginTop: 10, fontSize: 13 }}>עבור לפרויקטים →</button>
+    </div> },
+    { icon: "🎯", title: "שלב 3: 3 מטרות לשבוע הבא", content: <div>
+      <div style={{ fontSize: 12, color: C.textLight, marginBottom: 12 }}>מה חיוני? בחר 3 בלבד</div>
+      {["עיקרית", "שנייה", "שלישית"].map((l, i) => (
+        <div key={i} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: i === 0 ? C.purple : C.textLight, marginBottom: 5 }}>{i === 0 ? "🔵" : "⚫"} {l}</div>
+          <input placeholder={`מטרה ${i + 1}...`} style={{ ...inp, border: `1.5px solid ${i === 0 ? C.purple + "40" : C.grayBorder}` }} />
+        </div>
+      ))}
+      <div style={{ background: C.greenLight, borderRadius: 10, padding: 14, marginTop: 10, textAlign: "center" }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.green }}>🎉 הסקירה הושלמה!</div>
+      </div>
+    </div> }
+  ];
+  const s = STEPS[step];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 150, padding: 16 }} onClick={onClose}>
+      <div style={{ background: C.white, borderRadius: 16, padding: 22, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto", direction: "rtl" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", gap: 5, marginBottom: 18 }}>{STEPS.map((_, i) => <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i <= step ? C.purple : C.grayBorder }} />)}</div>
+        <div style={{ fontSize: 26, marginBottom: 5 }}>{s.icon}</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 16 }}>{s.title}</div>
+        {s.content}
+        <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+          {step > 0 && <button onClick={() => setStep(s => s - 1)} style={{ flex: 1, background: C.grayLight, color: C.textMid, border: "none", borderRadius: 10, padding: 12, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>← חזור</button>}
+          {step < STEPS.length - 1 ? <button onClick={() => setStep(s => s + 1)} style={{ flex: 2, ...btn(), borderRadius: 10, padding: 12, fontSize: 14 }}>המשך →</button> : <button onClick={onClose} style={{ flex: 2, ...btn(C.green), borderRadius: 10, padding: 12, fontSize: 14 }}>✅ סיים</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── RecoveryModal ─────────────────────────────────────────────────────────────
+function RecoveryModal({ tasks, projects, onClose, onNav }) {
+  const shortTasks = tasks.filter(t => !t.completed && t.estMins <= 15).slice(0, 3);
+  const criticalProj = projects.filter(p => p.status === "active")[0];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 16 }} onClick={onClose}>
+      <div style={{ background: C.white, borderRadius: 16, padding: 22, width: "100%", maxWidth: 440, direction: "rtl" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 26, marginBottom: 8 }}>🔄</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 4 }}>חזרה למסלול — 10 דקות</div>
+        <div style={{ fontSize: 12, color: C.textLight, marginBottom: 16 }}>לא מסדרים הכל — רק חוזרים לבסיס</div>
+        <div style={{ background: C.purpleLight, borderRadius: 12, padding: 16, marginBottom: 14 }}>
+          {["📥 אינבוקס — מזהים פרויקט קריטי אחד", "▶ בוחרים Next Action של 5–15 דקות", "📅 קובעים סקירה שבועית קרובה", "▶ ממשיכים"].map((s, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: i < 3 ? `1px solid ${C.purple}20` : "none" }}>
+              <div style={{ width: 22, height: 22, borderRadius: "50%", background: C.purple, color: C.white, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{i + 1}</div>
+              <div style={{ fontSize: 13, color: C.purple }}>{s}</div>
+            </div>
+          ))}
+        </div>
+        {shortTasks.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>▶ פעולות קצרות (5–15 דק׳):</div>
+            {shortTasks.map(t => <div key={t.id} style={{ background: C.grayLight, borderRadius: 8, padding: "8px 12px", marginBottom: 5, fontSize: 13, color: C.text }}>{t.text}</div>)}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { onClose(); onNav("inbox"); }} style={{ flex: 1, ...btn(), borderRadius: 10, padding: 11, fontSize: 13 }}>📥 אינבוקס</button>
+          <button onClick={() => { onClose(); onNav("projects"); }} style={{ flex: 1, ...btn(C.purpleMid), borderRadius: 10, padding: 11, fontSize: 13 }}>📁 פרויקטים</button>
+        </div>
+        <button onClick={onClose} style={{ width: "100%", background: "none", border: "none", color: C.textLight, padding: "10px 0 0", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>סגור</button>
+      </div>
+    </div>
+  );
+}
+
+// ── ADHDApp (root) ────────────────────────────────────────────────────────────
+function ADHDApp() {
+  const [tab, setTab] = useState("today");
+  const [inbox, setInbox] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [daily, setDaily] = useState({ energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "" });
+  const [settings, setSettings] = useState({ morningTime: "08:00", eveningTime: "21:30", notif: false });
+  const [history, setHistory] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [processItem, setProcessItem] = useState(null);
+  const [recovery, setRecovery] = useState(false);
+  const [weeklyReview, setWeeklyReview] = useState(false);
+
+  useEffect(() => {
+    async function init() {
+      const [i, t, p, d, se, h] = await Promise.all([
+        sget("adhd-inbox-v1", []),
+        sget("adhd-tasks-v1", []),
+        sget("adhd-projects-v1", []),
+        sget(`adhd-daily-v1-${TODAY}`, { energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "" }),
+        sget("adhd-settings-v1", { morningTime: "08:00", eveningTime: "21:30", notif: false }),
+        sget("adhd-history-v1", []),
+      ]);
+      setInbox(i); setTasks(t); setProjects(p); setDaily(d); setSettings(se); setHistory(h);
+      setLoaded(true);
+    }
+    init();
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const doneToday = tasks.filter(t => t.completed && t.completedAt?.startsWith(TODAY)).length;
+    const snap = { date: TODAY, done: doneToday, inbox: inbox.length, energy: daily.energy || 0, closed: daily.closed };
+    const updated = [...history.filter(h => h.date !== TODAY), snap].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+    setHistory(updated);
+    sset("adhd-history-v1", updated);
+  }, [loaded, daily.energy, daily.closed, tasks.length]);
+
+  const updInbox = v => { const val = typeof v === "function" ? v(inbox) : v; setInbox(val); sset("adhd-inbox-v1", val); };
+  const updTasks = v => setTasks(prev => { const val = typeof v === "function" ? v(prev) : v; sset("adhd-tasks-v1", val); return val; });
+  const updProjects = v => setProjects(prev => { const val = typeof v === "function" ? v(prev) : v; sset("adhd-projects-v1", val); return val; });
+  const updDaily = v => { setDaily(v); sset(`adhd-daily-v1-${TODAY}`, v); };
+  const updSettings = v => { setSettings(v); sset("adhd-settings-v1", v); };
+
+  const addToInbox = text => updInbox([{ id: uid(), text, ts: new Date().toISOString() }, ...inbox]);
+  const completeTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
+
+  const processInboxItem = (item, decision) => {
+    updInbox(inbox.filter(i => i.id !== item.id));
+    if (decision.type === "task") {
+      let finalProjectId = null;
+      if (decision.isProject) {
+        const newProj = { id: uid(), name: item.text, outcome: "", done_definition: "", why: "", deadline: "", not_in_scope: "", blockers: "", reference: "", status: "active", milestones: [], createdAt: new Date().toISOString() };
+        finalProjectId = newProj.id;
+        const updatedProjs = [...projects, newProj];
+        setProjects(updatedProjs);
+        sset("adhd-projects-v1", updatedProjs);
+      }
+      const newTask = { id: uid(), text: decision.nextAction || item.text, nextAction: decision.nextAction || item.text, time: decision.time || "week", projectId: finalProjectId, context: decision.context || "", estMins: decision.estMins || 15, energy: decision.energy || "medium", status: "active", completed: false, createdAt: new Date().toISOString() };
+      const updatedTasks = [...tasks, newTask];
+      setTasks(updatedTasks);
+      sset("adhd-tasks-v1", updatedTasks);
+    }
+  };
+
+  const projsNoNA = projects.filter(p => p.status === "active" && !tasks.some(t => t.projectId === p.id && !t.completed && t.status !== "waiting")).length;
+
+  const TABS = [
+    { id: "today", label: "היום", icon: "🎯" },
+    { id: "inbox", label: "אינבוקס", icon: "📥", badge: inbox.length },
+    { id: "projects", label: "פרויקטים", icon: "📁", badge: projsNoNA },
+    { id: "focus", label: "פוקוס", icon: "⏱️" },
+    { id: "metrics", label: "מדדים", icon: "📊" },
+    { id: "settings", label: "הגדרות", icon: "⚙️" },
+  ];
+
+  if (!loaded) return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: C.bg, fontFamily: "system-ui" }}>
+      <div style={{ fontSize: 52, marginBottom: 16 }}>🧠</div>
+      <div style={{ color: C.textLight, fontSize: 15 }}>טוען...</div>
+    </div>
+  );
+
+  return (
+    <div dir="rtl" style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", background: C.bg, minHeight: "100vh", maxWidth: 500, margin: "0 auto" }}>
+      <div style={{ background: "linear-gradient(135deg, #4338CA, #7C3AED)", color: C.white, padding: "14px 18px 11px", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>🧠 מערכת ADHD</div>
+            <div style={{ fontSize: 11, opacity: 0.85 }}>{new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" })}</div>
+          </div>
+          <button onClick={() => setRecovery(true)} style={{ background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 8, padding: "6px 12px", color: C.white, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>🔄 חזרה למסלול</button>
+        </div>
+      </div>
+
+      <div style={{ paddingBottom: 72 }}>
+        {tab === "today"    && <TodayTab daily={daily} updDaily={updDaily} tasks={tasks} projects={projects} completeTask={completeTask} setTab={setTab} setWeeklyReview={setWeeklyReview} setCalendarModal={() => {}} />}
+        {tab === "inbox"    && <InboxTab inbox={inbox} addToInbox={addToInbox} setProcessItem={setProcessItem} updInbox={updInbox} />}
+        {tab === "projects" && <ProjectsTab projects={projects} tasks={tasks} updProjects={updProjects} updTasks={updTasks} setCalendarModal={null} />}
+        {tab === "focus"    && <FocusTab tasks={tasks} />}
+        {tab === "metrics"  && <MetricsTab tasks={tasks} projects={projects} inbox={inbox} daily={daily} history={history} />}
+        {tab === "settings" && <SettingsTab settings={settings} updSettings={updSettings} tasks={tasks} inbox={inbox} projects={projects} updTasks={updTasks} updInbox={updInbox} updProjects={updProjects} setWeeklyReview={setWeeklyReview} />}
+      </div>
+
+      <nav style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 500, background: C.white, borderTop: `1px solid ${C.grayBorder}`, display: "flex", zIndex: 20 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, border: "none", background: "none", cursor: "pointer", padding: "7px 2px 9px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, position: "relative", fontFamily: "inherit" }}>
+            <span style={{ fontSize: 17, opacity: tab === t.id ? 1 : 0.45 }}>{t.icon}</span>
+            <span style={{ fontSize: 9, fontWeight: tab === t.id ? 700 : 400, color: tab === t.id ? "#4338CA" : C.textLight }}>{t.label}</span>
+            {t.badge > 0 && <div style={{ position: "absolute", top: 4, right: "50%", marginRight: -14, background: C.red, borderRadius: "50%", width: 15, height: 15, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: C.white }}>{t.badge > 9 ? "9+" : t.badge}</div>}
+          </button>
+        ))}
+      </nav>
+
+      {processItem && <ProcessModal item={processItem} projects={projects} onClose={() => setProcessItem(null)} onProcess={(item, dec) => { processInboxItem(item, dec); setProcessItem(null); }} />}
+      {recovery && <RecoveryModal tasks={tasks} projects={projects} onClose={() => setRecovery(false)} onNav={t => { setRecovery(false); setTab(t); }} />}
+      {weeklyReview && <WeeklyReviewModal inbox={inbox} tasks={tasks} projects={projects} onClose={() => setWeeklyReview(false)} onNav={t => { setWeeklyReview(false); setTab(t); }} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ADHDApp />);
+</script>
 </body>
 </html>
