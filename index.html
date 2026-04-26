@@ -149,8 +149,8 @@ function ProjectModal({ project, onClose, onSave }) {
         {(p.milestones || []).map((m, i) => (
           <div key={m.id} style={{ background: m.completed ? C.greenLight : C.grayLight, borderRadius: 10, padding: 10, marginBottom: 6, border: `1px solid ${m.completed ? C.green + "30" : C.grayBorder}` }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <button onClick={() => updM(m.id, "completed", !m.completed)} style={{ fontSize: 16, background: "none", border: "none", cursor: "pointer", color: m.completed ? C.green : C.grayBorder }}>{m.completed ? "✅" : "⬜"}</button>
               <input value={m.text} onChange={e => updM(m.id, "text", e.target.value)} style={{ flex: 1, fontSize: 13, fontWeight: 600, color: m.completed ? C.green : C.text, textDecoration: m.completed ? "line-through" : "none", border: "none", borderBottom: `1px dashed ${C.grayBorder}`, background: "transparent", outline: "none", fontFamily: "inherit", direction: "rtl", padding: "2px 0" }} />
+              <button onClick={() => updM(m.id, "completed", !m.completed)} title={m.completed ? "הסר סימון" : "סמן כהושלם"} style={{ fontSize: 12, background: m.completed ? C.green : "transparent", color: m.completed ? "#fff" : C.textLight, border: `1px solid ${m.completed ? C.green : C.grayBorder}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", flexShrink: 0 }}>{m.completed ? "✓ הושלם" : "סמן ✓"}</button>
               <button onClick={() => delM(m.id)} style={{ background: "none", border: "none", color: C.grayBorder, cursor: "pointer", fontSize: 14 }}>✕</button>
             </div>
             {!m.completed && (
