@@ -273,6 +273,7 @@ function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal 
   const saveProject = p => updProjects(prev => { const exists = prev.find(x => x.id === p.id); return exists ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]; });
   const deleteProject = id => updProjects(prev => prev.filter(p => p.id !== id));
   const completeTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
+  const uncompleteTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: false, completedAt: null } : t));
   const deleteTask = id => updTasks(prev => prev.filter(t => t.id !== id));
 
   const pendingTasks = tasks.filter(t => !t.completed);
@@ -388,6 +389,7 @@ function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal 
                                 <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: C.greenLight, borderRadius: 8, marginBottom: 4, opacity: 0.8 }}>
                                   <span style={{ color: C.green, fontSize: 14 }}>✓</span>
                                   <div style={{ flex: 1, fontSize: 13, color: C.green, textDecoration: "line-through" }}>{t.text}</div>
+                                  <button onClick={() => uncompleteTask(t.id)} title="בטל סימון" style={{ background: "none", border: "none", color: C.textLight, cursor: "pointer", fontSize: 14 }}>↩</button>
                                 </div>
                               ))}
                             </div>
