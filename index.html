@@ -521,31 +521,31 @@ function CarryOverModal({ tasks, daily, updDaily, addToInbox, onClose }) {
 // ── PlanDayModal ──────────────────────────────────────────────────────────────
 function PlanDayModal({ daily, updDaily, tasks, onClose }) {
   const pending = tasks.filter(t => !t.completed && t.status !== "waiting");
-  const [main, setMain] = useState(daily.main || "");
-  const [small1, setSmall1] = useState(daily.small1 || "");
-  const [small2, setSmall2] = useState(daily.small2 || "");
-  const [searches, setSearches] = useState({ main: daily.main || "", small1: daily.small1 || "", small2: daily.small2 || "" });
+  const [slots, setSlots] = useState({
+    main: daily.main || "", mainId: daily.mainId || null,
+    small1: daily.small1 || "", small1Id: daily.small1Id || null,
+    small2: daily.small2 || "", small2Id: daily.small2Id || null,
+  });
   const [focused, setFocused] = useState(null);
 
-  const setSlot = (key, val, setter) => { setter(val); setSearches(s => ({ ...s, [key]: val })); };
+  const setSlotText = (key, val) => setSlots(s => ({ ...s, [key]: val, [`${key}Id`]: null }));
+  const pickTask = (key, t) => { setSlots(s => ({ ...s, [key]: t.text, [`${key}Id`]: t.id })); setFocused(null); };
 
-  const pick = (key, text, setter) => { setter(text); setSearches(s => ({ ...s, [key]: text })); setFocused(null); };
+  const save = () => { updDaily({ ...daily, ...slots, mainDone: false, small1Done: false, small2Done: false }); onClose(); };
 
-  const save = () => { updDaily({ ...daily, main, small1, small2 }); onClose(); };
-
-  const Slot = ({ label, color, slotKey, value, setter }) => {
-    const q = searches[slotKey] || "";
+  const Slot = ({ label, color, slotKey }) => {
+    const q = slots[slotKey] || "";
     const opts = pending.filter(t => !q || t.text.includes(q)).slice(0, 6);
     return (
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color, marginBottom: 6 }}>{label}</div>
-        <input value={q} onChange={e => setSlot(slotKey, e.target.value, setter)}
+        <input value={q} onChange={e => setSlotText(slotKey, e.target.value)}
           onFocus={() => setFocused(slotKey)} placeholder="חפש משימה או הקלד חופשי..."
           style={{ width: "100%", border: `1.5px solid ${color}50`, borderRadius: 8, padding: "8px 12px", fontSize: 13, outline: "none", fontFamily: "inherit", direction: "rtl", boxSizing: "border-box" }} />
         {focused === slotKey && opts.length > 0 && (
           <div style={{ background: C.white, border: `1px solid ${C.grayBorder}`, borderRadius: 8, marginTop: 4, overflow: "hidden" }}>
             {opts.map(t => (
-              <div key={t.id} onMouseDown={() => pick(slotKey, t.text, setter)}
+              <div key={t.id} onMouseDown={() => pickTask(slotKey, t)}
                 style={{ padding: "8px 12px", fontSize: 13, cursor: "pointer", borderBottom: `1px solid ${C.grayLight}`, color: C.text }}>
                 {t.text}
               </div>
@@ -561,9 +561,9 @@ function PlanDayModal({ daily, updDaily, tasks, onClose }) {
       <div style={{ background: C.white, borderRadius: 16, padding: 20, width: "100%", maxWidth: 440, maxHeight: "92vh", overflowY: "auto", direction: "rtl" }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.text, marginBottom: 4 }}>📅 תכנון היום</div>
         <div style={{ fontSize: 12, color: C.textLight, marginBottom: 18 }}>בחר מהרשימה או הקלד חופשי</div>
-        <Slot label="🔵 עיקרית — המשימה הכי חשובה" color={C.purple} slotKey="main" value={main} setter={setMain} />
-        <Slot label="⚫ 2 — משימה קטנה" color={C.text} slotKey="small1" value={small1} setter={setSmall1} />
-        <Slot label="⚫ 3 — משימה קטנה" color={C.text} slotKey="small2" value={small2} setter={setSmall2} />
+        <Slot label="🔵 עיקרית — המשימה הכי חשובה" color={C.purple} slotKey="main" />
+        <Slot label="⚫ 2 — משימה קטנה" color={C.text} slotKey="small1" />
+        <Slot label="⚫ 3 — משימה קטנה" color={C.text} slotKey="small2" />
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <button onClick={save} style={{ ...btn(), flex: 1, padding: "10px", fontSize: 14 }}>שמור ✓</button>
           <button onClick={onClose} style={{ flex: 1, padding: "10px", fontSize: 14, background: C.grayLight, border: "none", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", color: C.textMid }}>ביטול</button>
@@ -618,7 +618,7 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.purple, marginBottom: 5 }}>🔵 עיקרית</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: daily.mainDone ? C.greenLight : C.purpleLight + "30", borderRadius: 8, minHeight: 38 }}>
-            <button onClick={() => updDaily({ ...daily, mainDone: !daily.mainDone })} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${daily.mainDone ? C.green : C.purple}`, background: daily.mainDone ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 13 }}>{daily.mainDone ? "✓" : ""}</button>
+            <button onClick={() => { const done = !daily.mainDone; updDaily({ ...daily, mainDone: done }); if (done && daily.mainId) completeTask(daily.mainId); }} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${daily.mainDone ? C.green : C.purple}`, background: daily.mainDone ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 13 }}>{daily.mainDone ? "✓" : ""}</button>
             <div style={{ flex: 1, fontSize: 14, color: daily.main ? (daily.mainDone ? C.green : C.text) : C.textLight, textDecoration: daily.mainDone ? "line-through" : "none" }}>{daily.main || "לא נקבעה משימה עיקרית"}</div>
           </div>
         </div>
@@ -626,7 +626,7 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
           <div key={k} style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>⚫ {i + 2}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: daily[doneK] ? C.greenLight : C.grayLight, borderRadius: 8, minHeight: 34 }}>
-              <button onClick={() => updDaily({ ...daily, [doneK]: !daily[doneK] })} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${daily[doneK] ? C.green : C.grayBorder}`, background: daily[doneK] ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 12 }}>{daily[doneK] ? "✓" : ""}</button>
+              <button onClick={() => { const done = !daily[doneK]; updDaily({ ...daily, [doneK]: done }); if (done && daily[`${k}Id`]) completeTask(daily[`${k}Id`]); }} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${daily[doneK] ? C.green : C.grayBorder}`, background: daily[doneK] ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 12 }}>{daily[doneK] ? "✓" : ""}</button>
               <div style={{ flex: 1, fontSize: 13, color: daily[k] ? (daily[doneK] ? C.green : C.text) : C.textLight, textDecoration: daily[doneK] ? "line-through" : "none" }}>{daily[k] || "לא נקבעה"}</div>
             </div>
           </div>
@@ -1411,7 +1411,7 @@ function ADHDApp({ logout }) {
   const [inbox, setInbox] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
-  const [daily, setDaily] = useState({ energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "", mainDone: false, small1Done: false, small2Done: false });
+  const [daily, setDaily] = useState({ energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "", mainId: null, small1Id: null, small2Id: null, mainDone: false, small1Done: false, small2Done: false });
   const [settings, setSettings] = useState({ morningTime: "08:00", eveningTime: "21:30", notif: false });
   const [history, setHistory] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -1426,7 +1426,7 @@ function ADHDApp({ logout }) {
         sget("adhd-inbox-v1", []),
         sget("adhd-tasks-v1", []),
         sget("adhd-projects-v1", []),
-        sget(`adhd-daily-v1-${TODAY}`, { energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "", mainDone: false, small1Done: false, small2Done: false }),
+        sget(`adhd-daily-v1-${TODAY}`, { energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "", mainId: null, small1Id: null, small2Id: null, mainDone: false, small1Done: false, small2Done: false }),
         sget("adhd-settings-v1", { morningTime: "08:00", eveningTime: "21:30", notif: false }),
         sget("adhd-history-v1", []),
       ]);
@@ -1461,7 +1461,14 @@ function ADHDApp({ logout }) {
   const updSettings = v => { setSettings(v); sset("adhd-settings-v1", v); };
 
   const addToInbox = text => updInbox([{ id: uid(), text, ts: new Date().toISOString() }, ...inbox]);
-  const completeTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
+  const completeTask = id => {
+    updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
+    const upd = {};
+    if (daily.mainId === id) upd.mainDone = true;
+    if (daily.small1Id === id) upd.small1Done = true;
+    if (daily.small2Id === id) upd.small2Done = true;
+    if (Object.keys(upd).length > 0) updDaily({ ...daily, ...upd });
+  };
 
   const processInboxItem = (item, decision) => {
     updInbox(inbox.filter(i => i.id !== item.id));
