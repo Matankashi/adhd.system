@@ -687,7 +687,14 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
             <div style={{ fontSize: 14, fontWeight: 700, color: daily.closed ? C.green : C.text }}>{daily.closed ? "✅ סגירה יומית בוצעה" : "🌙 סגירה יומית — 5 דק׳"}</div>
             <div style={{ fontSize: 12, color: C.textLight, marginTop: 2 }}>{daily.closed ? `ב-${daily.closedAt}` : "אינבוקס + בחר פעולה הבאה + קבע 3 למחר"}</div>
           </div>
-          {!daily.closed && <button onClick={() => { updDaily({ ...daily, closed: true, closedAt: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) }); setTab("inbox"); }} style={{ ...btn(), flexShrink: 0, padding: "8px 12px", fontSize: 13 }}>התחל →</button>}
+          {!daily.closed && <button onClick={() => {
+            const missing = [];
+            if (!daily.energy) missing.push("דירוג אנרגיה");
+            if (!daily.main) missing.push("משימה עיקרית");
+            if (missing.length > 0) { alert("נדרש לפני סגירה:\n• " + missing.join("\n• ")); return; }
+            updDaily({ ...daily, closed: true, closedAt: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) });
+            setTab("inbox");
+          }} style={{ ...btn(), flexShrink: 0, padding: "8px 12px", fontSize: 13 }}>התחל →</button>}
         </div>
       </div>
       {showPlanDay && <PlanDayModal daily={daily} updDaily={updDaily} tasks={tasks} onClose={() => setShowPlanDay(false)} />}
