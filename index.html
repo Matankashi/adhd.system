@@ -55,6 +55,7 @@ const sset = (key, val) => _db.ref(`adhd/${USER}/${key}`).set(val);
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const TODAY = new Date().toISOString().split("T")[0];
+const YESTERDAY = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; })();
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const pad = n => String(n).padStart(2, "0");
 const daysSince = dateStr => dateStr ? Math.floor((Date.now() - new Date(dateStr)) / 86400000) : 0;
@@ -463,8 +464,118 @@ function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal 
   );
 }
 
+// ── CarryOverModal ────────────────────────────────────────────────────────────
+function CarryOverModal({ tasks, daily, updDaily, addToInbox, onClose }) {
+  const [decisions, setDecisions] = useState({});
+  const decide = (key, val) => setDecisions(d => ({ ...d, [key]: val }));
+
+  const confirm = () => {
+    let newDaily = { ...daily };
+    const slots = ["main", "small1", "small2"];
+    const freeSlots = () => slots.filter(s => !newDaily[s]);
+
+    tasks.forEach(({ key, text }) => {
+      const d = decisions[key] || "dismiss";
+      if (d === "today") {
+        const slot = freeSlots()[0];
+        if (slot) newDaily[slot] = text;
+      } else if (d === "inbox") {
+        addToInbox(text);
+      }
+    });
+    newDaily.carryOverChecked = true;
+    updDaily(newDaily);
+    onClose();
+  };
+
+  const BtnGroup = ({ taskKey }) => (
+    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+      {[{ v: "today", l: "העבר להיום", c: C.purple }, { v: "inbox", l: "לאינבוקס", c: C.teal }, { v: "dismiss", l: "בטל", c: C.textLight }].map(({ v, l, c }) => (
+        <button key={v} onClick={() => decide(taskKey, v)}
+          style={{ flex: 1, padding: "6px 4px", fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+            background: decisions[taskKey] === v ? c + "20" : C.white,
+            border: `1.5px solid ${decisions[taskKey] === v ? c : C.grayBorder}`,
+            color: decisions[taskKey] === v ? c : C.textLight }}>{l}</button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 12 }}>
+      <div style={{ background: C.white, borderRadius: 16, padding: 20, width: "100%", maxWidth: 440, direction: "rtl" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.text, marginBottom: 4 }}>⚠️ משימות שלא הושלמו אתמול</div>
+        <div style={{ fontSize: 12, color: C.textLight, marginBottom: 16 }}>מה לעשות עם כל אחת?</div>
+        {tasks.map(({ key, label, text }) => (
+          <div key={key} style={{ background: C.grayLight, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: C.textLight, marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{text}</div>
+            <BtnGroup taskKey={key} />
+          </div>
+        ))}
+        <button onClick={confirm} style={{ ...btn(), width: "100%", padding: "10px", fontSize: 14, marginTop: 6 }}>אישור ✓</button>
+      </div>
+    </div>
+  );
+}
+
+// ── PlanDayModal ──────────────────────────────────────────────────────────────
+function PlanDayModal({ daily, updDaily, tasks, onClose }) {
+  const pending = tasks.filter(t => !t.completed && t.status !== "waiting");
+  const [main, setMain] = useState(daily.main || "");
+  const [small1, setSmall1] = useState(daily.small1 || "");
+  const [small2, setSmall2] = useState(daily.small2 || "");
+  const [searches, setSearches] = useState({ main: daily.main || "", small1: daily.small1 || "", small2: daily.small2 || "" });
+  const [focused, setFocused] = useState(null);
+
+  const setSlot = (key, val, setter) => { setter(val); setSearches(s => ({ ...s, [key]: val })); };
+
+  const pick = (key, text, setter) => { setter(text); setSearches(s => ({ ...s, [key]: text })); setFocused(null); };
+
+  const save = () => { updDaily({ ...daily, main, small1, small2 }); onClose(); };
+
+  const Slot = ({ label, color, slotKey, value, setter }) => {
+    const q = searches[slotKey] || "";
+    const opts = pending.filter(t => !q || t.text.includes(q)).slice(0, 6);
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color, marginBottom: 6 }}>{label}</div>
+        <input value={q} onChange={e => setSlot(slotKey, e.target.value, setter)}
+          onFocus={() => setFocused(slotKey)} placeholder="חפש משימה או הקלד חופשי..."
+          style={{ width: "100%", border: `1.5px solid ${color}50`, borderRadius: 8, padding: "8px 12px", fontSize: 13, outline: "none", fontFamily: "inherit", direction: "rtl", boxSizing: "border-box" }} />
+        {focused === slotKey && opts.length > 0 && (
+          <div style={{ background: C.white, border: `1px solid ${C.grayBorder}`, borderRadius: 8, marginTop: 4, overflow: "hidden" }}>
+            {opts.map(t => (
+              <div key={t.id} onMouseDown={() => pick(slotKey, t.text, setter)}
+                style={{ padding: "8px 12px", fontSize: 13, cursor: "pointer", borderBottom: `1px solid ${C.grayLight}`, color: C.text }}>
+                {t.text}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 12 }} onClick={onClose}>
+      <div style={{ background: C.white, borderRadius: 16, padding: 20, width: "100%", maxWidth: 440, maxHeight: "92vh", overflowY: "auto", direction: "rtl" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.text, marginBottom: 4 }}>📅 תכנון היום</div>
+        <div style={{ fontSize: 12, color: C.textLight, marginBottom: 18 }}>בחר מהרשימה או הקלד חופשי</div>
+        <Slot label="🔵 עיקרית — המשימה הכי חשובה" color={C.purple} slotKey="main" value={main} setter={setMain} />
+        <Slot label="⚫ 2 — משימה קטנה" color={C.text} slotKey="small1" value={small1} setter={setSmall1} />
+        <Slot label="⚫ 3 — משימה קטנה" color={C.text} slotKey="small2" value={small2} setter={setSmall2} />
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button onClick={save} style={{ ...btn(), flex: 1, padding: "10px", fontSize: 14 }}>שמור ✓</button>
+          <button onClick={onClose} style={{ flex: 1, padding: "10px", fontSize: 14, background: C.grayLight, border: "none", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", color: C.textMid }}>ביטול</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── TodayTab ──────────────────────────────────────────────────────────────────
 function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setWeeklyReview, setCalendarModal }) {
+  const [showPlanDay, setShowPlanDay] = useState(false);
   const todayTasks = tasks.filter(t => !t.completed && t.time === "today" && t.status !== "waiting");
   const doneToday = tasks.filter(t => t.completed && t.completedAt?.startsWith(TODAY));
   const projWithoutNA = projects.filter(p => p.status === "active" && !tasks.some(t => t.projectId === p.id && !t.completed && t.status !== "waiting"));
@@ -499,16 +610,19 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>🎯 שלושת הדברים להיום</div>
-          {doneToday.length > 0 && <Chip label={`✓ ${doneToday.length}`} color={C.green} />}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {doneToday.length > 0 && <Chip label={`✓ ${doneToday.length}`} color={C.green} />}
+            <button onClick={() => setShowPlanDay(true)} style={{ background: C.purpleLight, border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer", color: C.purple, fontFamily: "inherit" }}>✏️ ערוך</button>
+          </div>
         </div>
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.purple, marginBottom: 5 }}>🔵 עיקרית</div>
-          <input value={daily.main || ""} onChange={e => updDaily({ ...daily, main: e.target.value })} placeholder="המשימה הכי חשובה להיום..." style={{ ...inp, border: `2px solid ${C.purpleLight}` }} />
+          <div style={{ fontSize: 14, color: daily.main ? C.text : C.textLight, padding: "10px 12px", background: C.purpleLight + "30", borderRadius: 8, minHeight: 38 }}>{daily.main || "לא נקבעה משימה עיקרית"}</div>
         </div>
         {["small1", "small2"].map((k, i) => (
           <div key={k} style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>⚫ {i + 2}</div>
-            <input value={daily[k] || ""} onChange={e => updDaily({ ...daily, [k]: e.target.value })} placeholder="משימה קטנה..." style={inp} />
+            <div style={{ fontSize: 13, color: daily[k] ? C.text : C.textLight, padding: "8px 12px", background: C.grayLight, borderRadius: 8, minHeight: 34 }}>{daily[k] || "לא נקבעה"}</div>
           </div>
         ))}
       </div>
@@ -552,7 +666,11 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+        <button onClick={() => setShowPlanDay(true)} style={{ ...card, marginBottom: 0, cursor: "pointer", textAlign: "center", border: `1.5px solid ${C.purple}25` }}>
+          <div style={{ fontSize: 20, marginBottom: 4 }}>📅</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.purple }}>תכנון יום</div>
+        </button>
         <button onClick={() => setWeeklyReview(true)} style={{ ...card, marginBottom: 0, cursor: "pointer", textAlign: "center", border: `1.5px solid ${C.purple}25` }}>
           <div style={{ fontSize: 20, marginBottom: 4 }}>📋</div>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.purple }}>סקירה שבועית</div>
@@ -572,6 +690,7 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
           {!daily.closed && <button onClick={() => { updDaily({ ...daily, closed: true, closedAt: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) }); setTab("inbox"); }} style={{ ...btn(), flexShrink: 0, padding: "8px 12px", fontSize: 13 }}>התחל →</button>}
         </div>
       </div>
+      {showPlanDay && <PlanDayModal daily={daily} updDaily={updDaily} tasks={tasks} onClose={() => setShowPlanDay(false)} />}
     </div>
   );
 }
@@ -1286,6 +1405,7 @@ function ADHDApp({ logout }) {
   const [processItem, setProcessItem] = useState(null);
   const [recovery, setRecovery] = useState(false);
   const [weeklyReview, setWeeklyReview] = useState(false);
+  const [carryOverTasks, setCarryOverTasks] = useState([]);
 
   useEffect(() => {
     async function init() {
@@ -1298,6 +1418,15 @@ function ADHDApp({ logout }) {
         sget("adhd-history-v1", []),
       ]);
       setInbox(i); setTasks(t); setProjects(p); setDaily(d); setSettings(se); setHistory(h);
+      if (!d.carryOverChecked) {
+        const yd = await sget(`adhd-daily-v1-${YESTERDAY}`, {});
+        const pending = [
+          { key: "main", label: "🔵 עיקרית", text: yd.main },
+          { key: "small1", label: "⚫ 2", text: yd.small1 },
+          { key: "small2", label: "⚫ 3", text: yd.small2 },
+        ].filter(x => x.text);
+        if (pending.length > 0) setCarryOverTasks(pending);
+      }
       setLoaded(true);
     }
     init();
@@ -1394,6 +1523,7 @@ function ADHDApp({ logout }) {
       {processItem && <ProcessModal item={processItem} projects={projects} onClose={() => setProcessItem(null)} onProcess={(item, dec) => { processInboxItem(item, dec); setProcessItem(null); }} />}
       {recovery && <RecoveryModal tasks={tasks} projects={projects} onClose={() => setRecovery(false)} onNav={t => { setRecovery(false); setTab(t); }} />}
       {weeklyReview && <WeeklyReviewModal inbox={inbox} tasks={tasks} projects={projects} onClose={() => setWeeklyReview(false)} onNav={t => { setWeeklyReview(false); setTab(t); }} />}
+      {carryOverTasks.length > 0 && <CarryOverModal tasks={carryOverTasks} daily={daily} updDaily={updDaily} addToInbox={text => updInbox([{ id: uid(), text, ts: new Date().toISOString() }, ...inbox])} onClose={() => setCarryOverTasks([])} />}
     </div>
   );
 }
