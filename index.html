@@ -616,7 +616,7 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, uncompleteTa
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.purple, marginBottom: 5 }}>🔵 עיקרית</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: daily.mainDone ? C.greenLight : C.purpleLight + "30", borderRadius: 8, minHeight: 38 }}>
-            <button onClick={() => { const done = !daily.mainDone; updDaily({ ...daily, mainDone: done }); const id = daily.mainId || tasks.find(t => t.text === daily.main)?.id; if (id) { done ? completeTask(id) : uncompleteTask(id); } }} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${daily.mainDone ? C.green : C.purple}`, background: daily.mainDone ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 13 }}>{daily.mainDone ? "✓" : ""}</button>
+            <button onClick={() => { const done = !daily.mainDone; const id = daily.mainId || tasks.find(t => t.text === daily.main)?.id; if (id) { done ? completeTask(id) : uncompleteTask(id); } else updDaily({ ...daily, mainDone: done }); }} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${daily.mainDone ? C.green : C.purple}`, background: daily.mainDone ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 13 }}>{daily.mainDone ? "✓" : ""}</button>
             <div style={{ flex: 1, fontSize: 14, color: daily.main ? (daily.mainDone ? C.green : C.text) : C.textLight, textDecoration: daily.mainDone ? "line-through" : "none" }}>{daily.main || "לא נקבעה משימה עיקרית"}</div>
           </div>
         </div>
@@ -624,7 +624,7 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, uncompleteTa
           <div key={k} style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>⚫ {i + 2}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: daily[doneK] ? C.greenLight : C.grayLight, borderRadius: 8, minHeight: 34 }}>
-              <button onClick={() => { const done = !daily[doneK]; updDaily({ ...daily, [doneK]: done }); const id = daily[`${k}Id`] || tasks.find(t => t.text === daily[k])?.id; if (id) { done ? completeTask(id) : uncompleteTask(id); } }} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${daily[doneK] ? C.green : C.grayBorder}`, background: daily[doneK] ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 12 }}>{daily[doneK] ? "✓" : ""}</button>
+              <button onClick={() => { const done = !daily[doneK]; const id = daily[`${k}Id`] || tasks.find(t => t.text === daily[k])?.id; if (id) { done ? completeTask(id) : uncompleteTask(id); } else updDaily({ ...daily, [doneK]: done }); }} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${daily[doneK] ? C.green : C.grayBorder}`, background: daily[doneK] ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 12 }}>{daily[doneK] ? "✓" : ""}</button>
               <div style={{ flex: 1, fontSize: 13, color: daily[k] ? (daily[doneK] ? C.green : C.text) : C.textLight, textDecoration: daily[doneK] ? "line-through" : "none" }}>{daily[k] || "לא נקבעה"}</div>
             </div>
           </div>
@@ -1458,25 +1458,23 @@ function ADHDApp({ logout }) {
   const updDaily = v => { setDaily(v); sset(`adhd-daily-v1-${TODAY}`, v); };
   const updSettings = v => { setSettings(v); sset("adhd-settings-v1", v); };
 
+  // Auto-sync daily done flags whenever tasks completion state changes
+  useEffect(() => {
+    if (!loaded || (!daily.main && !daily.small1 && !daily.small2)) return;
+    const find = (text, id) => tasks.find(t => (id && t.id === id) || t.text === text);
+    const mainTask = find(daily.main, daily.mainId);
+    const s1Task = find(daily.small1, daily.small1Id);
+    const s2Task = find(daily.small2, daily.small2Id);
+    const upd = {};
+    if (mainTask && !!mainTask.completed !== !!daily.mainDone) upd.mainDone = !!mainTask.completed;
+    if (s1Task && !!s1Task.completed !== !!daily.small1Done) upd.small1Done = !!s1Task.completed;
+    if (s2Task && !!s2Task.completed !== !!daily.small2Done) upd.small2Done = !!s2Task.completed;
+    if (Object.keys(upd).length > 0) updDaily({ ...daily, ...upd });
+  }, [tasks, loaded]);
+
   const addToInbox = text => updInbox([{ id: uid(), text, ts: new Date().toISOString() }, ...inbox]);
-  const completeTask = id => {
-    updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
-    const task = tasks.find(t => t.id === id);
-    const upd = {};
-    if (task && (daily.mainId === id || task.text === daily.main)) upd.mainDone = true;
-    if (task && (daily.small1Id === id || task.text === daily.small1)) upd.small1Done = true;
-    if (task && (daily.small2Id === id || task.text === daily.small2)) upd.small2Done = true;
-    if (Object.keys(upd).length > 0) updDaily({ ...daily, ...upd });
-  };
-  const uncompleteTask = id => {
-    updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: false, completedAt: null } : t));
-    const t = tasks.find(t => t.id === id);
-    const upd = {};
-    if (t && (daily.mainId === id || t.text === daily.main)) upd.mainDone = false;
-    if (t && (daily.small1Id === id || t.text === daily.small1)) upd.small1Done = false;
-    if (t && (daily.small2Id === id || t.text === daily.small2)) upd.small2Done = false;
-    if (Object.keys(upd).length > 0) updDaily({ ...daily, ...upd });
-  };
+  const completeTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
+  const uncompleteTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: false, completedAt: null } : t));
 
   const processInboxItem = (item, decision) => {
     updInbox(inbox.filter(i => i.id !== item.id));
