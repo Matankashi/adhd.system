@@ -617,12 +617,18 @@ function TodayTab({ daily, updDaily, tasks, projects, completeTask, setTab, setW
         </div>
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.purple, marginBottom: 5 }}>🔵 עיקרית</div>
-          <div style={{ fontSize: 14, color: daily.main ? C.text : C.textLight, padding: "10px 12px", background: C.purpleLight + "30", borderRadius: 8, minHeight: 38 }}>{daily.main || "לא נקבעה משימה עיקרית"}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: daily.mainDone ? C.greenLight : C.purpleLight + "30", borderRadius: 8, minHeight: 38 }}>
+            <button onClick={() => updDaily({ ...daily, mainDone: !daily.mainDone })} style={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${daily.mainDone ? C.green : C.purple}`, background: daily.mainDone ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 13 }}>{daily.mainDone ? "✓" : ""}</button>
+            <div style={{ flex: 1, fontSize: 14, color: daily.main ? (daily.mainDone ? C.green : C.text) : C.textLight, textDecoration: daily.mainDone ? "line-through" : "none" }}>{daily.main || "לא נקבעה משימה עיקרית"}</div>
+          </div>
         </div>
-        {["small1", "small2"].map((k, i) => (
+        {[{ k: "small1", doneK: "small1Done" }, { k: "small2", doneK: "small2Done" }].map(({ k, doneK }, i) => (
           <div key={k} style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: C.textLight, marginBottom: 5 }}>⚫ {i + 2}</div>
-            <div style={{ fontSize: 13, color: daily[k] ? C.text : C.textLight, padding: "8px 12px", background: C.grayLight, borderRadius: 8, minHeight: 34 }}>{daily[k] || "לא נקבעה"}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: daily[doneK] ? C.greenLight : C.grayLight, borderRadius: 8, minHeight: 34 }}>
+              <button onClick={() => updDaily({ ...daily, [doneK]: !daily[doneK] })} style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${daily[doneK] ? C.green : C.grayBorder}`, background: daily[doneK] ? C.green : C.white, cursor: "pointer", flexShrink: 0, color: "#fff", fontSize: 12 }}>{daily[doneK] ? "✓" : ""}</button>
+              <div style={{ flex: 1, fontSize: 13, color: daily[k] ? (daily[doneK] ? C.green : C.text) : C.textLight, textDecoration: daily[doneK] ? "line-through" : "none" }}>{daily[k] || "לא נקבעה"}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -1405,7 +1411,7 @@ function ADHDApp({ logout }) {
   const [inbox, setInbox] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
-  const [daily, setDaily] = useState({ energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "" });
+  const [daily, setDaily] = useState({ energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "", mainDone: false, small1Done: false, small2Done: false });
   const [settings, setSettings] = useState({ morningTime: "08:00", eveningTime: "21:30", notif: false });
   const [history, setHistory] = useState([]);
   const [loaded, setLoaded] = useState(false);
@@ -1420,7 +1426,7 @@ function ADHDApp({ logout }) {
         sget("adhd-inbox-v1", []),
         sget("adhd-tasks-v1", []),
         sget("adhd-projects-v1", []),
-        sget(`adhd-daily-v1-${TODAY}`, { energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "" }),
+        sget(`adhd-daily-v1-${TODAY}`, { energy: 0, sleep: 0, meds: null, exercised: null, closed: false, main: "", small1: "", small2: "", mainDone: false, small1Done: false, small2Done: false }),
         sget("adhd-settings-v1", { morningTime: "08:00", eveningTime: "21:30", notif: false }),
         sget("adhd-history-v1", []),
       ]);
@@ -1428,10 +1434,10 @@ function ADHDApp({ logout }) {
       if (!d.carryOverChecked) {
         const yd = await sget(`adhd-daily-v1-${YESTERDAY}`, {});
         const pending = [
-          { key: "main", label: "🔵 עיקרית", text: yd.main },
-          { key: "small1", label: "⚫ 2", text: yd.small1 },
-          { key: "small2", label: "⚫ 3", text: yd.small2 },
-        ].filter(x => x.text);
+          { key: "main", label: "🔵 עיקרית", text: yd.main, done: yd.mainDone },
+          { key: "small1", label: "⚫ 2", text: yd.small1, done: yd.small1Done },
+          { key: "small2", label: "⚫ 3", text: yd.small2, done: yd.small2Done },
+        ].filter(x => x.text && !x.done);
         if (pending.length > 0) setCarryOverTasks(pending);
       }
       setLoaded(true);
