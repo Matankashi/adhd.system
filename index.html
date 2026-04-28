@@ -323,6 +323,7 @@ function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal 
                 <div style={{ fontSize: 12, fontWeight: 700, color: st.c, marginBottom: 8 }}>{st.l.toUpperCase()} ({grp.length})</div>
                 {grp.map(proj => {
                   const pTasks = pendingTasks.filter(t => t.projectId === proj.id);
+                  const doneTasks = tasks.filter(t => t.projectId === proj.id && t.completed);
                   const activeMilestone = proj.milestones?.find(m => !m.completed);
                   const totalM = proj.milestones?.length || 0;
                   const doneM = proj.milestones?.filter(m => m.completed).length || 0;
@@ -376,6 +377,17 @@ function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal 
                                     </div>
                                   </div>
                                   <button onClick={() => deleteTask(t.id)} style={{ background: "none", border: "none", color: C.grayBorder, cursor: "pointer", fontSize: 13 }}>✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {doneTasks.length > 0 && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: C.green, marginBottom: 6 }}>✓ הושלמו ({doneTasks.length})</div>
+                              {doneTasks.map(t => (
+                                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: C.greenLight, borderRadius: 8, marginBottom: 4, opacity: 0.8 }}>
+                                  <span style={{ color: C.green, fontSize: 14 }}>✓</span>
+                                  <div style={{ flex: 1, fontSize: 13, color: C.green, textDecoration: "line-through" }}>{t.text}</div>
                                 </div>
                               ))}
                             </div>
