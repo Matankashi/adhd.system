@@ -261,7 +261,7 @@ function NextActionModal({ projects, onClose, onSave, initialProjectId }) {
 }
 
 // ── ProjectsTab ───────────────────────────────────────────────────────────────
-function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal }) {
+function ProjectsTab({ projects, tasks, updProjects, updTasks, completeTask, uncompleteTask, setCalendarModal }) {
   const [view, setView] = useState("projects");
   const [showNewProject, setShowNewProject] = useState(false);
   const [editProject, setEditProject] = useState(null);
@@ -273,8 +273,6 @@ function ProjectsTab({ projects, tasks, updProjects, updTasks, setCalendarModal 
 
   const saveProject = p => updProjects(prev => { const exists = prev.find(x => x.id === p.id); return exists ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]; });
   const deleteProject = id => updProjects(prev => prev.filter(p => p.id !== id));
-  const completeTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: true, completedAt: new Date().toISOString() } : t));
-  const uncompleteTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: false, completedAt: null } : t));
   const deleteTask = id => updTasks(prev => prev.filter(t => t.id !== id));
 
   const pendingTasks = tasks.filter(t => !t.completed);
@@ -1469,7 +1467,15 @@ function ADHDApp({ logout }) {
     if (daily.small2Id === id) upd.small2Done = true;
     if (Object.keys(upd).length > 0) updDaily({ ...daily, ...upd });
   };
-  const uncompleteTask = id => updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: false, completedAt: null } : t));
+  const uncompleteTask = id => {
+    updTasks(prev => prev.map(t => t.id === id ? { ...t, completed: false, completedAt: null } : t));
+    const t = tasks.find(t => t.id === id);
+    const upd = {};
+    if (t && (daily.mainId === id || t.text === daily.main)) upd.mainDone = false;
+    if (t && (daily.small1Id === id || t.text === daily.small1)) upd.small1Done = false;
+    if (t && (daily.small2Id === id || t.text === daily.small2)) upd.small2Done = false;
+    if (Object.keys(upd).length > 0) updDaily({ ...daily, ...upd });
+  };
 
   const processInboxItem = (item, decision) => {
     updInbox(inbox.filter(i => i.id !== item.id));
@@ -1525,7 +1531,7 @@ function ADHDApp({ logout }) {
       <div style={{ paddingBottom: 72 }}>
         {tab === "today"    && <TodayTab daily={daily} updDaily={updDaily} tasks={tasks} projects={projects} completeTask={completeTask} uncompleteTask={uncompleteTask} setTab={setTab} setWeeklyReview={setWeeklyReview} setCalendarModal={() => {}} />}
         {tab === "inbox"    && <InboxTab inbox={inbox} addToInbox={addToInbox} setProcessItem={setProcessItem} updInbox={updInbox} />}
-        {tab === "projects" && <ProjectsTab projects={projects} tasks={tasks} updProjects={updProjects} updTasks={updTasks} setCalendarModal={null} />}
+        {tab === "projects" && <ProjectsTab projects={projects} tasks={tasks} updProjects={updProjects} updTasks={updTasks} completeTask={completeTask} uncompleteTask={uncompleteTask} setCalendarModal={null} />}
         {tab === "focus"    && <FocusTab tasks={tasks} />}
         {tab === "metrics"  && <MetricsTab tasks={tasks} projects={projects} inbox={inbox} daily={daily} history={history} />}
         {tab === "settings" && <SettingsTab settings={settings} updSettings={updSettings} tasks={tasks} inbox={inbox} projects={projects} updTasks={updTasks} updInbox={updInbox} updProjects={updProjects} setWeeklyReview={setWeeklyReview} />}
