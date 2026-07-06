@@ -17,7 +17,13 @@
       messagingSenderId: "1019976182145",
       appId: "1:1019976182145:web:d2dc3e1b7763604d68a080"
     });
-    firebase.auth().signInAnonymously().catch(console.error);
+    window.__authReady = new Promise(resolve => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      firebase.auth().onAuthStateChanged(user => { if (user) finish(); });
+      firebase.auth().signInAnonymously().catch(err => { console.error("Anonymous auth failed:", err); finish(); });
+      setTimeout(finish, 8000);
+    });
   </script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -51,7 +57,7 @@ const sget = (key, fallback) => new Promise(res =>
     } else {
       res(val !== null ? val : fallback);
     }
-  })
+  }, err => { console.error(`sget(${key}) failed:`, err); res(fallback); })
 );
 const sset = (key, val) => _db.ref(`adhd/${USER}/${key}`).set(val);
 
@@ -1072,7 +1078,7 @@ function UserSelect({ onSelect, onAdmin }) {
       } else {
         setUsers([{ username: "matan", pin: null }, { username: "guest", pin: null }]);
       }
-    });
+    }, err => { console.error(err); setUsers([{ username: "matan", pin: null }, { username: "guest", pin: null }]); });
   }, []);
 
   const ICONS = ["👤","🙂","🌟","🎯","🦊","🐙","🧩","🚀"];
@@ -1109,7 +1115,7 @@ function AdminPinScreen({ onSuccess, onBack }) {
     ref.current?.focus();
     _db.ref("adhd/_admin/adminPin").once("value", snap => {
       setAdminPin(snap.exists() ? snap.val() : "0000");
-    });
+    }, err => { console.error(err); setAdminPin("0000"); });
   }, []);
 
   const check = p => {
@@ -1157,7 +1163,7 @@ function AdminConfirmPin({ label, onConfirm, onCancel }) {
     ref.current?.focus();
     _db.ref("adhd/_admin/adminPin").once("value", snap => {
       setAdminPin(snap.exists() ? snap.val() : "0000");
-    });
+    }, err => { console.error(err); setAdminPin("0000"); });
   }, []);
 
   const check = p => {
@@ -1220,7 +1226,7 @@ function AdminPanel({ onBack }) {
       });
       setUsers(userList);
       setLoading(false);
-    });
+    }, err => { console.error(err); setLoading(false); });
   }, []);
 
   useEffect(() => {
@@ -1230,7 +1236,7 @@ function AdminPanel({ onBack }) {
       } else {
         setManagedUsers({ matan: { pin: null }, guest: { pin: null } });
       }
-    });
+    }, err => { console.error(err); setManagedUsers({ matan: { pin: null }, guest: { pin: null } }); });
   }, []);
 
   const savePin = async (type) => {
@@ -1569,15 +1575,17 @@ function Root() {
     _db.ref(`adhd/_admin/users/${activeUser}`).once("value", snap => {
       if (snap.exists() && snap.val().pin) {
         setUserPin(snap.val().pin);
+        setPinChecked(true);
       } else if (activeUser === "matan") {
         _db.ref("adhd/_admin/matanPin").once("value", s => {
           setUserPin(s.exists() ? s.val() : CORRECT_PIN);
-        });
+          setPinChecked(true);
+        }, err => { console.error(err); setUserPin(CORRECT_PIN); setPinChecked(true); });
       } else {
         setUserPin(null);
+        setPinChecked(true);
       }
-      setPinChecked(true);
-    });
+    }, err => { console.error(err); setUserPin(activeUser === "matan" ? CORRECT_PIN : null); setPinChecked(true); });
   }, [activeUser]);
 
   const selectUser = u => { localStorage.setItem("adhd_active_user", u); localStorage.removeItem("adhd_pin_ok"); setPinOk(false); setPinChecked(false); setActiveUser(u); };
@@ -1592,7 +1600,9 @@ function Root() {
   return <ADHDApp logout={logout} />;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+window.__authReady.then(() => {
+  ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+});
 </script>
 </body>
 </html>
